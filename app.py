@@ -246,6 +246,10 @@ def api_ssh_test():
     若本机和对方不同网段，会自动临时加同网段 IP 连过去，读完立刻删掉。
     """
     data = request.get_json(force=True)
+    # 预览：只返回「测试连接」时将在对方机器上执行的只读命令文本，
+    # 不连对方、不读账号密码——和第③步「预览」完全一致，保证所见即所跑。
+    if data.get("preview"):
+        return jsonify(ok=True, preview=True, script=netplan.build_inspect_script())
     try:
         (rc, out, err), temp = _with_temp_reach(
             data.get("iface"),

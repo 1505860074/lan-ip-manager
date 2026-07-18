@@ -192,6 +192,16 @@ function pick(ip) {
   document.querySelector("[name=peer_ip]").value = ip;
 }
 
+// ===== ② 预览：只向后端要「测试连接时将执行的只读命令文本」，不登录对方、不读账号密码 =====
+// 和第③步的 previewChange 一样：让你先看清「测试连接」会在对方机器上跑哪些命令，再决定要不要连。
+async function previewTest() {
+  const box = document.getElementById("testPreviewBox");
+  box.classList.remove("hidden");
+  box.textContent = "正在生成预览……";
+  const r = await post("/api/ssh_test", { preview: true });
+  box.textContent = r.ok ? r.script : "无法生成预览：" + r.error;
+}
+
 // ===== ② 测试连接：登录对方并回显只读诊断信息 =====
 // 说明：本机和对方不同网段时，后端会自动临时加同网段 IP 连过去、读完删掉，前端不用管。
 async function sshTest() {

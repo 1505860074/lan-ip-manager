@@ -20,16 +20,16 @@
 }
 
 :root {
-  --bg:        #04080f;   /* 屏幕最底色：近黑带一点蓝 */
-  --panel:     rgba(6, 14, 24, 0.72);   /* 面板/卡片：半透明，透出壁纸 */
-  --panel-deep:rgba(2, 6, 14, 0.82);    /* 输入框/输出区：更深、更实，保证可读 */
-  --neon:      #2fd0ff;   /* 主荧光蓝：正文、边框 */
-  --neon-dim:  #1f89b8;   /* 暗蓝：次要文字、说明 */
-  --neon-hi:   #bff0ff;   /* 高亮蓝：标题、强调 */
+  --bg:        #03100f;   /* 屏幕最底色：近黑，带一点青 */
+  --panel:     rgba(5, 18, 22, 0.72);   /* 面板/卡片：半透明，透出壁纸 */
+  --panel-deep:rgba(2, 9, 12, 0.82);    /* 输入框/输出区：更深、更实，保证可读 */
+  --neon:      #1ff0ff;   /* 主荧光蓝（偏青）：正文、边框——更亮更饱和 */
+  --neon-dim:  #2acbe0;   /* 次青蓝：次要文字、说明——提亮提饱和 */
+  --neon-hi:   #d4feff;   /* 高亮青白：标题、强调 */
   --amber:     #ffcc33;   /* 琥珀：警告点缀 */
   --danger:    #ff5555;   /* 危险操作用的红 */
-  --line:      #1b5c7a;   /* 分隔线/边框的暗蓝 */
-  --glow:      0 0 4px rgba(47, 208, 255, 0.55);  /* 字符荧光辉 */
+  --line:      #1f8fa6;   /* 分隔线/边框：偏青、比原来更亮 */
+  --glow:      0 0 5px rgba(31, 240, 255, 0.65);  /* 字符荧光辉（偏青、更强） */
 }
 
 * { box-sizing: border-box; }
@@ -69,20 +69,24 @@ body {
 header, footer { max-width: 1400px; margin: 0 auto; padding: 0 20px; }
 header { padding-top: 28px; }
 
-/* ---- 顶层左右两栏：左=① 找到对方设备，右=② 连接对方 / ③ 修改 IP ---- */
+/* ---- 顶层三列平铺：① 找到对方设备 → ② 连接对方 → ③ 修改 IP，一步一列 ---- */
 .layout {
   max-width: 1400px;
   margin: 0 auto;
   padding: 0 20px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);  /* 左右等宽 */
+  /* 三列平铺，但不等宽：① 里是两张数据表格，比 ②③ 的表单更吃横向空间，
+     所以给它约 1.6 份、②③ 各 1 份，表格才排得开、不会把按钮挤成竖排。 */
+  grid-template-columns: 1.6fr 1fr 1fr;
   gap: 18px;
   align-items: start;
 }
-.col-left, .col-right { min-width: 0; }
-.col-left > section:first-child,
-.col-right > section:first-child { margin-top: 0; }
-@media (max-width: 1000px) {
+.layout > section { min-width: 0; margin-top: 0; }   /* 三列各自顶端对齐，去掉多余上边距 */
+/* 窗口变窄时逐级回退：先两列，再单列，避免列太窄挤成一团 */
+@media (max-width: 1100px) {
+  .layout { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 720px) {
   .layout { grid-template-columns: 1fr; }
 }
 
@@ -92,7 +96,7 @@ h1 {
   font-size: 18px;
   line-height: 1.5;
   color: var(--neon-hi);
-  text-shadow: 0 0 6px rgba(47, 208, 255, 0.8);
+  text-shadow: 0 0 6px rgba(31, 240, 255, 0.8);
   letter-spacing: 1px;
 }
 h2 {
@@ -122,15 +126,25 @@ section {
   border-radius: 0;
   padding: 16px 20px;
   margin-top: 18px;
-  box-shadow: 0 0 12px rgba(47, 208, 255, 0.15), inset 0 0 30px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 12px rgba(31, 240, 255, 0.15), inset 0 0 30px rgba(0, 0, 0, 0.5);
   -webkit-backdrop-filter: blur(2px);   /* 轻微毛玻璃：透出壁纸又保证文字清楚 */
   backdrop-filter: blur(2px);
 }
 
 /* ---- 表格 ---- */
-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 18px; }
-th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); }
-th { color: var(--neon-dim); text-transform: uppercase; letter-spacing: 1px; }
+table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 17px; }
+th, td {
+  text-align: left; padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+th {
+  color: var(--neon-dim); text-transform: uppercase; letter-spacing: 1px;
+  white-space: nowrap;          /* 表头短词不换行（如「网线」不被拆成两行） */
+}
+/* 表格里的操作按钮：整体不换行 + 去掉外边距 + 收紧内边距，
+   避免窄列里「扫描找设备」被压成一个字一行的竖排。 */
+td .btn { white-space: nowrap; margin: 0; padding: 4px 10px; }
 
 /* ---- 按钮：直角、边框、悬停反色 ---- */
 .btn {
@@ -159,9 +173,9 @@ th { color: var(--neon-dim); text-transform: uppercase; letter-spacing: 1px; }
 .btn.ghost { border-color: var(--line); color: var(--neon-dim); }
 .btn.ghost:hover { background: var(--line); color: var(--neon-hi); }
 
-/* ---- 表单 ---- */
+/* ---- 表单：label 块级竖排，输入框在各自模块里自上而下排成一列 ---- */
 label {
-  display: inline-block; margin: 6px 14px 6px 0;
+  display: block; margin: 10px 0 0;
   font-size: 17px; color: var(--neon-dim);
 }
 input, textarea {
@@ -170,13 +184,13 @@ input, textarea {
   border: 1px solid var(--line);
   border-radius: 0;
   color: var(--neon-hi);
-  padding: 6px 9px; width: 180px;
+  padding: 6px 9px; width: 100%;   /* 填满所在列/fieldset，竖排更整齐 */
   font-family: "VT323", monospace; font-size: 18px;
   text-shadow: var(--glow);
 }
 input:focus, textarea:focus {
   outline: none; border-color: var(--neon);
-  box-shadow: 0 0 8px rgba(47, 208, 255, 0.4);
+  box-shadow: 0 0 8px rgba(31, 240, 255, 0.4);
 }
 fieldset {
   border: 1px solid var(--line); border-radius: 0;
@@ -201,11 +215,11 @@ footer { margin-top: 24px; }
   padding: 0 5px; margin-right: 8px;
   font-family: "Press Start 2P", "VT323", monospace;
   font-size: 15px; line-height: 1.4;
-  text-shadow: 0 0 6px rgba(47, 208, 255, 0.8);
+  text-shadow: 0 0 6px rgba(31, 240, 255, 0.8);
 }
 
 /* ① 网口表里「已连」的整行淡蓝高亮，让人一眼锁定该用哪个口 */
-#ifaceTable tr.connected td { background: rgba(47, 208, 255, 0.10); }
+#ifaceTable tr.connected td { background: rgba(31, 240, 255, 0.10); }
 
 /* ③ 修改 IP 的一排操作按钮 */
 .term-actions {
@@ -226,7 +240,7 @@ footer { margin-top: 24px; }
 }
 
 /* 连通/成功的绿松石高亮小字 */
-.ok-text { color: var(--neon-hi); text-shadow: 0 0 5px rgba(47, 208, 255, 0.7); }
+.ok-text { color: var(--neon-hi); text-shadow: 0 0 5px rgba(31, 240, 255, 0.7); }
 
 /* ① 面板顶部工具行：刷新网口 + 扫描时长 并排 */
 .row-tools {

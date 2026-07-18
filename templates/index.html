@@ -21,11 +21,8 @@
     </p>
   </header>
 
-  <!-- 顶层左右两栏：左=① 找到对方设备；右=② 连接对方 / ③ 修改 IP -->
+  <!-- 顶层三列平铺：① 找到对方设备 → ② 连接对方 → ③ 修改 IP，从左到右一步一列 -->
   <div class="layout">
-
-  <!-- ===== 左栏：找到并选定对方 ===== -->
-  <div class="col-left">
 
   <!-- ① 找到对方设备（选口 + 扫描 + 结果，一个面板串起来） -->
   <section id="step1">
@@ -57,30 +54,33 @@
     </table>
   </section>
 
-  </div><!-- /col-left -->
-
-  <!-- ===== 右栏：连上对方并改它的 IP ===== -->
-  <div class="col-right">
-
   <!-- ② 连接对方 -->
   <section id="step3">
-    <h2><span class="step-badge">2</span> 连接对方</h2>
+    <h2><span class="step-badge">2</span> 测试网络连接</h2>
     <p class="hint">填对方账号密码，点「测试连接」确认能登录。<b>如果本机和对方不在同一网段，程序会在连接时自动临时打通网络、用完自动清理，你不用管</b>——所以不再需要手动「打通链路」这一步。</p>
 
     <fieldset>
+      <legend>本机（你这台电脑）</legend>
+      <label title="你这台电脑上、插网线连对方的那个口（① 扫描时已自动填）。不同网段时，程序自动用它临时加/删 IP。是本机的口，不是对方的">本机直连网口 <small>(① 扫描时自动填)</small> <input name="iface" placeholder="① 扫描后自动填"></label>
+    </fieldset>
+
+    <fieldset>
       <legend>对方登录信息</legend>
-      <label title="对方设备现在的 IP；在 ① 里点「选为目标」会自动填好">对方当前 IP <input name="peer_ip" placeholder="如 192.168.5.10"></label>
+      <label title="对方设备现在的 IP；在 ① 里点「选为目标」会自动填好">对方当前 IP <input name="peer_ip" placeholder="① 扫描后自动填，如 192.168.5.10"></label>
       <label title="对方 SSH 服务的端口，默认 22，一般不用改">SSH 端口 <input name="port" type="number" value="22"></label>
-      <label title="登录对方用的账号，如 root 或 ubuntu">账号 <input name="username" placeholder="如 root / ubuntu"></label>
+      <label title="登录对方用的账号，如 user / root / ubuntu">账号 <input name="username" placeholder="如 user / root / ubuntu"></label>
       <label title="上面这个账号的登录密码">密码 <input name="password" type="password"></label>
-      <label title="改网络配置要 root 权限。多数系统 sudo 密码就是登录密码，所以留空即可">sudo 密码<br><small>(留空=同登录密码)</small> <input name="sudo_password" type="password"></label>
-      <label title="你这台电脑上、插网线连对方的那个口（① 扫描时已自动填）。不同网段时，程序自动用它临时加/删 IP。是本机的口，不是对方的">本机直连网口 <small>(本机，① 自动填)</small> <input name="iface" placeholder="① 扫描后自动填"></label>
+      <label title="改网络配置要 root 权限。多数系统 sudo 密码就是登录密码，所以留空即可">sudo 密码 <input name="sudo_password" type="password" placeholder="留空=同登录密码"></label>
     </fieldset>
 
     <fieldset>
       <legend>测试连接</legend>
       <p class="hint">用上面的账号密码登录对方，<b>只读地</b>回显它的主机名和当前网络配置：既确认能连上，又方便你抄下对方的<b>网口名</b>，填到下面 ③。此操作不改动对方任何东西。</p>
-      <button class="btn" title="用上面账号密码登录对方，只读显示它的主机名/网口/netplan 配置，不改动任何东西（不同网段会自动临时打通、用完清理）" onclick="sshTest()">测试连接并查看对方信息</button>
+      <div class="term-actions">
+        <button class="btn" title="只显示「测试连接」时将在对方机器上执行的只读命令，不连接、不改动任何东西——先看清楚再执行" onclick="previewTest()">预览将执行的命令</button>
+        <button class="btn danger" title="用上面账号密码登录对方，只读显示它的主机名/网口/netplan 配置，不改动任何东西（不同网段会自动临时打通、用完清理）" onclick="sshTest()">测试连接并查看对方信息</button>
+      </div>
+      <pre id="testPreviewBox" class="preview hidden"></pre>
       <div id="testOutput" class="output"></div>
     </fieldset>
   </section>
@@ -104,14 +104,12 @@
 
     <div class="term-actions">
       <button class="btn" title="只显示将要执行的完整命令，不连接、不改动任何东西——先看清楚再执行" onclick="previewChange()">预览将执行的命令</button>
-      <button class="btn danger" title="通过 SSH 依次执行：备份对方原配置 → 写入新 IP → 应用。IP 生效后当前 SSH 会断开，属正常" onclick="runChange()">执行修改（自动备份→写入→应用）</button>
+      <button class="btn danger" title="通过 SSH 依次执行：备份对方原配置 → 写入新 IP → 应用（全自动）。IP 生效后当前 SSH 会断开，属正常" onclick="runChange()">执行修改（自动备份）</button>
       <button class="btn ghost" title="把之前自动备份的 netplan 配置拷回去并重新应用，用于改错时回退" onclick="restoreIp()">还原到备份</button>
     </div>
     <pre id="previewBox" class="preview hidden"></pre>
     <div id="changeOutput" class="output"></div>
   </section>
-
-  </div><!-- /col-right -->
 
   </div><!-- /layout -->
 
