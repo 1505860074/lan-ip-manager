@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>局域网设备 IP 管理面板</title>
+  <!-- 像素/CRT 终端字体已随项目打包在 static/fonts/，离线也能用，无需联网 -->
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <!-- 固定半透明壁纸层（不随滚动、按比例铺满窗口、80% 不透明） -->
+  <div class="bg-layer"></div>
+  <header>
+    <h1>局域网设备 IP 管理面板</h1>
+    <p class="hint">
+      给「网线直连、但和你不在同一网段」的 Linux 设备改 IP。
+      按 <b>① 选网口 → ② 发现设备 → ③ 连接对方 → ④ 修改 IP</b> 四步走，每步都有说明和反馈。
+    </p>
+    <p id="rootWarn" class="warn hidden">
+      【警告】当前不是以 root 运行，扫描和调整网段会失败，请用 <code>sudo</code> 启动本程序。
+    </p>
+  </header>
+
+  <!-- 顶层左右两栏：左=① 找到对方设备；右=② 连接对方 / ③ 修改 IP -->
+  <div class="layout">
+
+  <!-- ===== 左栏：找到并选定对方 ===== -->
+  <div class="col-left">
+
+  <!-- ① 找到对方设备（选口 + 扫描 + 结果，一个面板串起来） -->
+  <section id="step1">
+    <h2><span class="step-badge">1</span> 找到对方设备</h2>
+    <p class="hint">
+      在「网线」列显示 <b>已连</b> 的那行——那就是插了网线、连着对方的口——点它那行的 <b>「扫描找设备」</b>。
+      程序会在这个口上<b>持续监听</b>对方发出的广播包，<b>每秒刷新</b>下方结果，<b>即便网段不同也能发现它、拿到它当前的 IP</b>；
+      找到对方后点「停止扫描」即可。同时这个口会自动填到右侧 ② 的「本机直连网口」（不同网段时程序靠它自动临时打通）。未插网线的口按钮是灰的、不能扫。
+    </p>
+
+    <div class="row-tools">
+      <button class="btn" onclick="loadIfaces()">刷新网口</button>
+    </div>
+
+    <h3>本机网口 <small>（点「已连」口的“扫描找设备”）</small></h3>
+    <table id="ifaceTable">
+      <thead><tr><th>网口</th><th>网线</th><th>状态</th><th>当前 IP</th><th>操作</th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <h3>扫描发现的设备
+      <button id="stopScanBtn" class="btn ghost hidden" title="停止后台持续抓包（已发现的结果会保留）" onclick="stopScan()">停止扫描</button>
+    </h3>
+    <p class="hint">列表是<b>「当前在线」实时视图</b>：每秒刷新，新设备随时加入，<b>超过 20 秒没再出现的会自动移除</b>（比如拔了线）。「来源」为 <b>ARP·可信</b> 的最靠谱；「最近出现」显示每台设备的新鲜度。找到对方后点那行「选为目标」（IP 自动填进右侧 ② 的「对方当前 IP」），再点「停止扫描」。</p>
+    <div id="scanStatus" class="status"></div>
+    <table id="devTable">
+      <thead><tr><th>MAC</th><th>对方 IP</th><th>来源</th><th>最近出现</th><th>操作</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  </div><!-- /col-left -->
+
+  <!-- ===== 右栏：连上对方并改它的 IP ===== -->
+  <div class="col-right">
+
+  <!-- ② 连接对方 -->
+  <section id="step3">
+    <h2><span class="step-badge">2</span> 连接对方</h2>
+    <p class="hint">填对方账号密码，点「测试连接」确认能登录。<b>如果本机和对方不在同一网段，程序会在连接时自动临时打通网络、用完自动清理，你不用管</b>——所以不再需要手动「打通链路」这一步。</p>
+
+    <fieldset>
+      <legend>对方登录信息</legend>
+      <label title="对方设备现在的 IP；在 ① 里点「选为目标」会自动填好">对方当前 IP <input name="peer_ip" placeholder="如 192.168.5.10"></label>
+      <label title="对方 SSH 服务的端口，默认 22，一般不用改">SSH 端口 <input name="port" type="number" value="22"></label>
+      <label title="登录对方用的账号，如 root 或 ubuntu">账号 <input name="username" placeholder="如 root / ubuntu"></label>
+      <label title="上面这个账号的登录密码">密码 <input name="password" type="password"></label>
+      <label title="改网络配置要 root 权限。多数系统 sudo 密码就是登录密码，所以留空即可">sudo 密码<br><small>(留空=同登录密码)</small> <input name="sudo_password" type="password"></label>
+      <label title="你这台电脑上、插网线连对方的那个口（① 扫描时已自动填）。不同网段时，程序自动用它临时加/删 IP。是本机的口，不是对方的">本机直连网口 <small>(本机，① 自动填)</small> <input name="iface" placeholder="① 扫描后自动填"></label>
+    </fieldset>
+
+    <fieldset>
+      <legend>测试连接</legend>
+      <p class="hint">用上面的账号密码登录对方，<b>只读地</b>回显它的主机名和当前网络配置：既确认能连上，又方便你抄下对方的<b>网口名</b>，填到下面 ③。此操作不改动对方任何东西。</p>
+      <button class="btn" title="用上面账号密码登录对方，只读显示它的主机名/网口/netplan 配置，不改动任何东西（不同网段会自动临时打通、用完清理）" onclick="sshTest()">测试连接并查看对方信息</button>
+      <div id="testOutput" class="output"></div>
+    </fieldset>
+  </section>
+
+  <!-- ③ 修改对方 IP -->
+  <section id="step4">
+    <h2><span class="step-badge">3</span> 修改对方 IP</h2>
+    <p class="hint">
+      填好新 IP，先点“预览”看清将执行的命令，确认无误后再“执行”。执行是<b>全自动</b>的：
+      必要时临时打通网络 → <b>备份 → 写入 → 应用</b> → 清理临时 IP → <b>自动 ping 验证新 IP 是否生效</b>，
+      全程无需你手动敲命令，最后直接告诉你新 IP 通不通。
+    </p>
+
+    <fieldset>
+      <legend>目标网络设置（netplan）</legend>
+      <label title="对方那台机器上要改 IP 的网口名（如 eth0），不是你本机的口。可从 ②「测试连接」的回显里抄">对方网口名 <small>(对方，非本机)</small> <input name="remote_iface" placeholder="如 eth0 / enp3s0"></label>
+      <label title="想把对方改成的新 IP">新 IP <input name="new_ip" placeholder="如 192.168.1.50"></label>
+      <label title="子网掩码位数，通常 24">新前缀 <input name="new_prefix" type="number" value="24"></label>
+      <label title="默认网关；只在对方需要访问其它网段/外网时才填，纯直连场景一般留空">网关(可选) <input name="gateway" placeholder="如 192.168.1.1"></label>
+    </fieldset>
+
+    <div class="term-actions">
+      <button class="btn" title="只显示将要执行的完整命令，不连接、不改动任何东西——先看清楚再执行" onclick="previewChange()">预览将执行的命令</button>
+      <button class="btn danger" title="通过 SSH 依次执行：备份对方原配置 → 写入新 IP → 应用。IP 生效后当前 SSH 会断开，属正常" onclick="runChange()">执行修改（自动备份→写入→应用）</button>
+      <button class="btn ghost" title="把之前自动备份的 netplan 配置拷回去并重新应用，用于改错时回退" onclick="restoreIp()">还原到备份</button>
+    </div>
+    <pre id="previewBox" class="preview hidden"></pre>
+    <div id="changeOutput" class="output"></div>
+  </section>
+
+  </div><!-- /col-right -->
+
+  </div><!-- /layout -->
+
+  <footer>
+    <p class="hint">
+      改 IP 目前内置的是 netplan 一套流程（Ubuntu 18.04+ 默认）。执行前程序会<b>自动备份</b>对方原配置到
+      <code>/tmp/netplan-bak/</code>；改错可能导致对方暂时失联，可用“还原到备份”回退。
+      新 IP 生效瞬间当前 SSH 会断开，属正常现象。
+    </p>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

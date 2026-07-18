@@ -1,0 +1,35 @@
+# ---- Python 虚拟环境（别人 clone 后用 requirements.txt 自己重建，不上传）----
+.venv/
+venv/
+env/
+
+# ---- Python 字节码缓存 ----
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ---- PyInstaller 打包产物（build.sh 生成的成品，不上传）----
+build/
+dist/
+*.spec
+
+# ---- 编辑器 / AI 工具的本地配置目录 ----
+.vscode/
+.idea/
+.cursor/
+.claude/
+.zed/
+.fleet/
+.aider*
+
+# ---- 本地环境变量 / 密钥（万一以后有，先兜住，避免误传）----
+.env
+.env.*
+*.pem
+*.key
+
+# ---- 操作系统杂项 ----
+*.swp
+*~
+.DS_Store
+Thumbs.db

@@ -1,0 +1,267 @@
+/* ============================================================
+   荧光蓝 CRT 终端 · 像素复古风 + 半透明壁纸背景
+   —— 老式显示器：黑底、荧光蓝字、扫描线、字符发光；
+      叠一张固定的半透明壁纸，面板做成半透明玻璃感透出壁纸。
+   配色都收敛在 :root 变量里，想调整只改这里即可。
+   ============================================================ */
+
+/* 字体随项目打包在 static/fonts/（OFL 开源许可），离线可用、无需联网。
+   VT323 = 经典 CRT 终端字体；Press Start 2P = 8-bit 像素字（用于主标题）。
+   font-display: swap —— 字体没加载好前先用后备等宽字体顶上，不留白屏。 */
+@font-face {
+  font-family: "VT323";
+  src: url("/static/fonts/VT323-Regular.ttf") format("truetype");
+  font-weight: normal; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Press Start 2P";
+  src: url("/static/fonts/PressStart2P-Regular.ttf") format("truetype");
+  font-weight: normal; font-style: normal; font-display: swap;
+}
+
+:root {
+  --bg:        #04080f;   /* 屏幕最底色：近黑带一点蓝 */
+  --panel:     rgba(6, 14, 24, 0.72);   /* 面板/卡片：半透明，透出壁纸 */
+  --panel-deep:rgba(2, 6, 14, 0.82);    /* 输入框/输出区：更深、更实，保证可读 */
+  --neon:      #2fd0ff;   /* 主荧光蓝：正文、边框 */
+  --neon-dim:  #1f89b8;   /* 暗蓝：次要文字、说明 */
+  --neon-hi:   #bff0ff;   /* 高亮蓝：标题、强调 */
+  --amber:     #ffcc33;   /* 琥珀：警告点缀 */
+  --danger:    #ff5555;   /* 危险操作用的红 */
+  --line:      #1b5c7a;   /* 分隔线/边框的暗蓝 */
+  --glow:      0 0 4px rgba(47, 208, 255, 0.55);  /* 字符荧光辉 */
+}
+
+* { box-sizing: border-box; }
+
+/* html 提供最底层的纯色画布（壁纸若有透明处也不会露白） */
+html { background: var(--bg); }
+
+body {
+  margin: 0;
+  /* VT323 是经典 CRT 终端字体；离线退回等宽字体 */
+  font-family: "VT323", "Courier New", Consolas, monospace;
+  font-size: 19px;
+  background: transparent;      /* 透明，好让下面的 .bg-layer 壁纸露出来 */
+  color: var(--neon);
+  line-height: 1.5;
+  padding: 0 0 40px;
+  text-shadow: var(--glow);
+  min-height: 100vh;
+  position: relative;
+  z-index: 0;                   /* 建立层叠上下文，正文在壁纸(-1)之上 */
+}
+
+/* ---- 固定壁纸层：不随滚动、不拉伸变形、按比例铺满、无黑边、80% 不透明 ---- */
+.bg-layer {
+  position: fixed;              /* 固定：不随滚动条滚动 */
+  inset: 0;                     /* 铺满整个窗口 */
+  z-index: -1;                  /* 压在所有内容下面 */
+  background-image: url("/static/img/back_ground.png");
+  background-position: center center;
+  background-repeat: no-repeat;
+  background-size: cover;       /* 只适应窗口大小：按比例裁切铺满，不拉伸、不留黑边 */
+  opacity: 0.8;                 /* 背景不透明度 80% */
+  /* 四周压暗一圈，做出老显像管暗角、也让边缘文字更清楚 */
+  box-shadow: inset 0 0 220px 70px rgba(0, 0, 0, 0.7);
+}
+
+header, footer { max-width: 1400px; margin: 0 auto; padding: 0 20px; }
+header { padding-top: 28px; }
+
+/* ---- 顶层左右两栏：左=① 找到对方设备，右=② 连接对方 / ③ 修改 IP ---- */
+.layout {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 20px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);  /* 左右等宽 */
+  gap: 18px;
+  align-items: start;
+}
+.col-left, .col-right { min-width: 0; }
+.col-left > section:first-child,
+.col-right > section:first-child { margin-top: 0; }
+@media (max-width: 1000px) {
+  .layout { grid-template-columns: 1fr; }
+}
+
+/* 主标题用 Press Start 2P 像素字；其余用 VT323 */
+h1 {
+  font-family: "Press Start 2P", "VT323", monospace;
+  font-size: 18px;
+  line-height: 1.5;
+  color: var(--neon-hi);
+  text-shadow: 0 0 6px rgba(47, 208, 255, 0.8);
+  letter-spacing: 1px;
+}
+h2 {
+  font-size: 26px;
+  color: var(--neon-hi);
+  border-left: 4px solid var(--neon);
+  padding-left: 10px;
+  margin-top: 30px;
+}
+h2::before { content: "\258D "; color: var(--neon); }   /* ▍ 终端块状光标点缀 */
+h3 { font-size: 22px; color: var(--neon-hi); margin: 0 0 10px; }
+
+.hint { color: var(--neon-dim); font-size: 17px; margin: 4px 0 10px; }
+.warn { color: var(--amber); font-weight: bold; text-shadow: 0 0 6px rgba(255, 204, 51, 0.7); }
+.hidden { display: none; }
+code {
+  background: var(--panel-deep);
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  color: var(--neon-hi);
+}
+
+/* 面板：半透明玻璃感，透出壁纸；直角、无圆角才够“像素” */
+section {
+  background: var(--panel);
+  border: 2px solid var(--neon);
+  border-radius: 0;
+  padding: 16px 20px;
+  margin-top: 18px;
+  box-shadow: 0 0 12px rgba(47, 208, 255, 0.15), inset 0 0 30px rgba(0, 0, 0, 0.5);
+  -webkit-backdrop-filter: blur(2px);   /* 轻微毛玻璃：透出壁纸又保证文字清楚 */
+  backdrop-filter: blur(2px);
+}
+
+/* ---- 表格 ---- */
+table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 18px; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+th { color: var(--neon-dim); text-transform: uppercase; letter-spacing: 1px; }
+
+/* ---- 按钮：直角、边框、悬停反色 ---- */
+.btn {
+  font-family: "VT323", monospace;
+  background: transparent;
+  color: var(--neon);
+  border: 2px solid var(--neon);
+  border-radius: 0;
+  padding: 5px 16px;
+  font-size: 18px;
+  cursor: pointer;
+  margin: 6px 6px 6px 0;
+  text-shadow: var(--glow);
+  transition: none;
+}
+.btn::before { content: "> "; }
+.btn:hover { background: var(--neon); color: var(--bg); text-shadow: none; }
+.btn:active { transform: translate(1px, 1px); }
+.btn:disabled {
+  border-color: var(--line); color: var(--line);
+  cursor: not-allowed; text-shadow: none;
+}
+.btn:disabled:hover { background: transparent; color: var(--line); }
+.btn.danger { border-color: var(--danger); color: var(--danger); text-shadow: 0 0 4px rgba(255,85,85,.5); }
+.btn.danger:hover { background: var(--danger); color: var(--bg); }
+.btn.ghost { border-color: var(--line); color: var(--neon-dim); }
+.btn.ghost:hover { background: var(--line); color: var(--neon-hi); }
+
+/* ---- 表单 ---- */
+label {
+  display: inline-block; margin: 6px 14px 6px 0;
+  font-size: 17px; color: var(--neon-dim);
+}
+input, textarea {
+  display: block; margin-top: 3px;
+  background: var(--panel-deep);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  color: var(--neon-hi);
+  padding: 6px 9px; width: 180px;
+  font-family: "VT323", monospace; font-size: 18px;
+  text-shadow: var(--glow);
+}
+input:focus, textarea:focus {
+  outline: none; border-color: var(--neon);
+  box-shadow: 0 0 8px rgba(47, 208, 255, 0.4);
+}
+fieldset {
+  border: 1px solid var(--line); border-radius: 0;
+  margin: 12px 0; padding: 8px 14px 14px;
+}
+legend { color: var(--neon-hi); font-size: 18px; padding: 0 6px; }
+legend::before { content: "[ "; } legend::after { content: " ]"; }
+
+.status { margin-top: 10px; font-size: 18px; min-height: 20px; color: var(--neon); }
+footer { margin-top: 24px; }
+
+/* ============================================================
+   步骤编号徽标 / 已连网口高亮 / 命令预览框
+   ============================================================ */
+/* h2 前的方块数字徽标：把「第几步」做得一眼可见，替代原来的 ①②③④ 文字 */
+.step-badge {
+  display: inline-block;
+  min-width: 1.5em; text-align: center;
+  border: 2px solid var(--neon);
+  background: var(--panel-deep);
+  color: var(--neon-hi);
+  padding: 0 5px; margin-right: 8px;
+  font-family: "Press Start 2P", "VT323", monospace;
+  font-size: 15px; line-height: 1.4;
+  text-shadow: 0 0 6px rgba(47, 208, 255, 0.8);
+}
+
+/* ① 网口表里「已连」的整行淡蓝高亮，让人一眼锁定该用哪个口 */
+#ifaceTable tr.connected td { background: rgba(47, 208, 255, 0.10); }
+
+/* ③ 修改 IP 的一排操作按钮 */
+.term-actions {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  margin-top: 12px;
+}
+
+/* ③「预览将执行的命令」框：虚线边框，和真正的输出区区分开 */
+.preview {
+  white-space: pre-wrap; word-break: break-all;
+  font-family: "VT323", "Courier New", monospace;
+  font-size: 16px; line-height: 1.45;
+  background: var(--panel-deep); color: var(--neon);
+  border: 1px dashed var(--neon-dim); border-radius: 0;
+  padding: 10px; margin: 12px 0 6px;
+  max-height: 320px; overflow: auto;
+  text-shadow: var(--glow);
+}
+
+/* 连通/成功的绿松石高亮小字 */
+.ok-text { color: var(--neon-hi); text-shadow: 0 0 5px rgba(47, 208, 255, 0.7); }
+
+/* ① 面板顶部工具行：刷新网口 + 扫描时长 并排 */
+.row-tools {
+  display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-end;
+  margin: 6px 0 4px;
+}
+.row-tools label { margin: 0; }
+
+/* 扫描结果：疑似网关的小标签 + 整行淡化 */
+.tag {
+  display: inline-block; font-size: 13px;
+  border: 1px solid var(--amber); color: var(--amber);
+  padding: 0 5px; margin-left: 6px;
+  text-shadow: 0 0 5px rgba(255, 204, 51, 0.6);
+}
+#devTable tr.gateway td { opacity: 0.6; }
+
+/* ---- 输出区 ---- */
+.output { margin-top: 12px; font-size: 18px; }
+.output .err { color: var(--danger); text-shadow: 0 0 4px rgba(255,85,85,.5); }
+.output .rc { font-weight: bold; margin-bottom: 6px; }
+.output .rc.ok { color: var(--neon-hi); }
+.output .rc.bad { color: var(--danger); }
+.output pre {
+  white-space: pre-wrap; word-break: break-all;
+  font-family: "VT323", "Courier New", monospace; font-size: 17px;
+  background: var(--panel-deep); color: var(--neon);
+  border: 1px solid var(--line); border-radius: 0;
+  padding: 10px; margin: 6px 0; max-height: 340px; overflow: auto;
+  text-shadow: var(--glow);
+}
+.output pre.stderr { color: var(--danger); border-color: rgba(255, 85, 85, 0.4); }
+
+/* 滚动条也做成终端配色 */
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: var(--panel-deep); }
+::-webkit-scrollbar-thumb { background: var(--line); border: 2px solid var(--bg); }
+::-webkit-scrollbar-thumb:hover { background: var(--neon-dim); }
