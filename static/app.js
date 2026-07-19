@@ -71,8 +71,8 @@ async function loadIfaces() {
     if (i.carrier) tr.classList.add("connected"); // 已连网口整行高亮，一眼看到
     // 插了网线才能扫描；灰按钮也带上 title 说明为什么不能点
     const scanBtn = i.carrier
-      ? `<button class="btn" title="在这个网口上监听，找出直连的对方设备；同时把它自动填到②的“本机直连网口”" onclick="scan('${i.name}')">扫描找设备</button>`
-      : `<button class="btn" disabled title="该口未插网线（未连），无法扫描">扫描找设备</button>`;
+      ? `<button class="btn" title="在这个网口上监听，找出直连的对方设备；同时把它自动填进第 ② 步的「本机直连网口」。" onclick="scan('${i.name}')">扫描找设备</button>`
+      : `<button class="btn" disabled title="该口未插网线（未连），无法扫描。">扫描找设备</button>`;
     tr.innerHTML = `
       <td>${i.name}</td>
       <td>${i.carrier ? "<b>已连</b>" : "未连"}</td>
@@ -83,7 +83,7 @@ async function loadIfaces() {
   }
 }
 
-// 把某网口名填进 ② 的“本机网口”框
+// 把某网口名填进第 ② 步的「本机直连网口」框
 function useIface(name) {
   document.querySelector("[name=iface]").value = name;
 }
@@ -132,7 +132,7 @@ async function pollScan() {
   // 安全上限：连扫超过 3 分钟自动停，省得后台一直抓
   if (performance.now() - scanStartMs > SCAN_MAX_MS) {
     stopScan();
-    s.textContent = `已自动停止（连扫超过 3 分钟）。共发现 ${n} 台设备；再点“扫描找设备”可重新开始。`;
+    s.textContent = `已自动停止（连扫超过 3 分钟）。共发现 ${n} 台设备；再点「扫描找设备」可重新开始。`;
   }
 }
 
@@ -161,7 +161,7 @@ function renderDevices(devices) {
       <td>${d.ip}${gw}</td>
       <td>${via}</td>
       <td>${ago}</td>
-      <td><button class="btn" title="把这一行的 IP 填进 ② 的「对方当前 IP」，作为要连接/改动的目标" onclick="pick('${d.ip}')">选为目标</button></td>`;
+      <td><button class="btn" title="把这一行的 IP 填进第 ② 步的「对方当前 IP」，作为要连接、改动的目标。" onclick="pick('${d.ip}')">选为目标</button></td>`;
     tb.appendChild(tr);
   }
 }
@@ -187,16 +187,20 @@ window.addEventListener("beforeunload", () => {
   if (scanTimer) navigator.sendBeacon("/api/scan_stop");
 });
 
-// 把发现的对方 IP 填进 ② 的“对方当前 IP”框
+// 把发现的对方 IP 填进第 ② 步的「对方当前 IP」框
 function pick(ip) {
   document.querySelector("[name=peer_ip]").value = ip;
 }
 
-// ===== ② 预览：只向后端要「测试连接时将执行的只读命令文本」，不登录对方、不读账号密码 =====
-// 和第③步的 previewChange 一样：让你先看清「测试连接」会在对方机器上跑哪些命令，再决定要不要连。
+// ===== ② 预览：只向后端要「测试连接时将执行的只读命令文本」，本身不登录对方、不发送账号密码 =====
+// 和第③步的 previewChange 一致：必填项（对方当前 IP / 账号 / 密码）都填好后才允许预览。
 async function previewTest() {
   const box = document.getElementById("testPreviewBox");
   box.classList.remove("hidden");
+  if (!collectConn()) {
+    box.textContent = "请先填好「对方当前 IP」「账号」「密码」，再预览。";
+    return;
+  }
   box.textContent = "正在生成预览……";
   const r = await post("/api/ssh_test", { preview: true });
   box.textContent = r.ok ? r.script : "无法生成预览：" + r.error;
@@ -219,9 +223,38 @@ async function sshTest() {
   }
   let html = '<div class="rc ok">登录成功</div>';
   html += tempNote(r.temp_used);
+  // 从回显里认出「IP 正好等于对方当前 IP」的那个网口，自动填进第 ③ 步的「对方网口名」
+  html += autofillRemoteIface(r.stdout || "", conn.peer_ip);
   html += `<pre class="std">${escapeHtml(r.stdout || "（无输出）")}</pre>`;
   if (r.stderr) html += `<pre class="stderr">${escapeHtml(r.stderr)}</pre>`;
   out.innerHTML = html;
+}
+
+// 从「测试连接」回显的 `ip -br addr` 段里，找出 IP 正好等于对方当前 IP 的那个网口，
+// 自动填进第 ③ 步的「对方网口名」。返回一行提示 html；没找到、或用户已手填则返回空串、不覆盖。
+function autofillRemoteIface(stdout, peerIp) {
+  const box = document.querySelector("[name=remote_iface]");
+  if (!box || !peerIp || !stdout) return "";
+  if (box.value.trim()) return ""; // 已手动填过就不覆盖
+  let inAddrSection = false;
+  for (const line of stdout.split("\n")) {
+    // 回显分成多段（主机名 / 网口和 IP / 路由 / netplan…）。只在「ip -br addr」那段里找，
+    // 免得把路由行、netplan yaml 里出现的同一个 IP 误当成网口名。
+    if (line.includes("=====")) {
+      inAddrSection = line.includes("ip -br addr");
+      continue;
+    }
+    if (!inAddrSection) continue;
+    // ip -br addr 每行形如：eth0  UP  192.168.5.10/24 fe80::.../64
+    const cols = line.trim().split(/\s+/);
+    if (cols.length < 3 || cols[0] === "lo") continue;
+    const hit = cols.slice(2).some((a) => a.split("/")[0] === peerIp);
+    if (hit) {
+      box.value = cols[0];
+      return `<div class="hint">（已自动把对方网口名「${escapeHtml(cols[0])}」填进第 ③ 步；如与预期不符可手动改。）</div>`;
+    }
+  }
+  return "";
 }
 
 // 若后端为了连通对方自动加过临时源地址 + 主机路由（用完已删），给一行说明。
@@ -243,11 +276,17 @@ function changeParams() {
 }
 
 // 预览：只向后端要「将执行的命令文本」，不连对方、不改任何东西。
+// 必填项（对方网口名 / 新 IP）都填好后才允许预览，和「执行」保持一致。
 async function previewChange() {
   const box = document.getElementById("previewBox");
+  const p = changeParams();
   box.classList.remove("hidden");
+  if (!p.remote_iface || !p.new_ip) {
+    box.textContent = "请先填好「对方网口名」和「新 IP」，再预览。";
+    return;
+  }
   box.textContent = "正在生成预览……";
-  const r = await post("/api/change_ip", { ...changeParams(), preview: true });
+  const r = await post("/api/change_ip", { ...p, preview: true });
   box.textContent = r.ok ? r.script : "无法生成预览：" + r.error;
 }
 
@@ -261,7 +300,7 @@ async function runChange() {
   }
   const conn = collectConn();
   if (!conn) {
-    out.innerHTML = '<span class="err">请先在上面 ② 填好「对方当前 IP」「账号」「密码」。</span>';
+    out.innerHTML = '<span class="err">请先在第 ② 步填好「对方当前 IP」「账号」「密码」。</span>';
     return;
   }
   const ok = confirm(
@@ -284,13 +323,24 @@ function renderChangeResult(out, r) {
   }
   let html = "";
   if (r.new_reachable === true) {
-    html += `<div class="rc ok">✔ 新 IP 生效：${escapeHtml(r.verify_note || "")}</div>`;
+    html += `<div class="rc ok">新 IP 已生效：${escapeHtml(r.verify_note || "")}</div>`;
   } else if (r.new_reachable === false) {
-    html += `<div class="rc bad">✘ ${escapeHtml(r.verify_note || "新 IP 验证不通过")}</div>`;
+    html += `<div class="rc bad">${escapeHtml(r.verify_note || "新 IP 验证不通过。")}</div>`;
   } else {
     html += `<div class="rc">${escapeHtml(r.verify_note || "已提交修改，但没有自动验证新 IP。")}</div>`;
   }
   html += tempNote(r.temp_used);
+  // 对方已搬到新 IP：确认 ping 通了，就把「对方当前 IP」自动更新为新 IP，
+  // 这样之后「测试连接」「还原到备份」连的都是对方的真实位置（而不是失效的旧 IP）。
+  if (r.new_reachable === true && r.new_ip) {
+    const box = document.querySelector("[name=peer_ip]");
+    if (box) {
+      box.value = r.new_ip;
+      html += `<div class="hint">（对方已在新 IP 上，已把「对方当前 IP」更新为 ${escapeHtml(r.new_ip)}；之后「测试连接」「还原到备份」都会连它。）</div>`;
+    }
+  } else if (r.new_reachable === false && r.new_ip) {
+    html += `<div class="hint">（若确认对方已搬到 ${escapeHtml(r.new_ip)}，可手动把「对方当前 IP」改成它再重试；若彻底连不上，只能物理接触对方恢复。）</div>`;
+  }
   // 远端执行命令的原始输出（备份/写入/应用的回显），折叠在下面供参考
   if (r.stdout) html += `<pre class="std">${escapeHtml(r.stdout)}</pre>`;
   if (r.stderr) html += `<pre class="stderr">${escapeHtml(r.stderr)}</pre>`;
@@ -302,7 +352,7 @@ async function restoreIp() {
   const out = document.getElementById("changeOutput");
   const conn = collectConn();
   if (!conn) {
-    out.innerHTML = '<span class="err">请先在上面 ② 填好「对方当前 IP」「账号」「密码」。</span>';
+    out.innerHTML = '<span class="err">请先在第 ② 步填好「对方当前 IP」「账号」「密码」。</span>';
     return;
   }
   if (!confirm("确认还原到之前备份的 netplan 配置吗？")) return;

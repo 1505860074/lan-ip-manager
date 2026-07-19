@@ -176,8 +176,9 @@ def _verify_new_ip(iface, new_ip):
     if rc == 0:
         return True, f"已 ping 通 {new_ip}，新 IP 生效。"
     return False, (
-        f"约 10 秒内 ping 不通 {new_ip}：对方可能还没起来，"
-        f"或新 IP / 网关填错。必要时可点「还原到备份」回退。"
+        f"约 10 秒内 ping 不通 {new_ip}：对方可能还没起来（可稍等再测），"
+        f"或新 IP / 网关填错。若对方还连得上，可用「还原到备份」回退；"
+        f"若彻底失联，只能物理接触对方恢复。"
     )
 
 
