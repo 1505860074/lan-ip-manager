@@ -24,14 +24,46 @@ app.log.2 …… 再开一个新的空文件继续写；最多保留 backupCount
 """
 import logging
 import os
+import pwd
 import sys
 from logging.handlers import RotatingFileHandler
 
-# 日志目录 = 项目根目录下的 logs/。
-# __file__ 是本文件 core/logsetup.py，dirname 两次上跳到项目根。
-LOG_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs"
-)
+
+def _base_dir():
+    """算出日志目录该放在哪儿的“父目录”。
+
+    分两种情况：
+      - 打包成单文件后（sys.frozen 为真）：__file__ 在 PyInstaller 的临时解压目录里，
+        程序一退出那目录就被删，日志会跟着没。所以日志要放在【可执行文件所在目录】旁边，
+        才能持久保留（sys.executable 就是那个可执行文件本身的路径）。
+      - 直接跑源码（开发时）：放在项目根目录（本文件 core/logsetup.py 往上跳两级）。
+    """
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+# 日志目录 = 上面算出的父目录下的 logs/。
+LOG_DIR = os.path.join(_base_dir(), "logs")
+
+
+def _chown_to_invoking_user(path):
+    """把 path 的属主改回“当初用 sudo 启动本程序的那个普通用户”（环境变量 SUDO_USER）。
+
+    程序以 root 运行时，它建的日志默认归 root，普通用户想读/删都得再 sudo，很别扭。
+    这里在建好目录/文件后把属主改回原用户，方便用户直接管理自己的日志。
+    只有“当前是 root 且确实是 sudo 提权来的”才改；否则什么都不做（也就不会报错）。
+    """
+    try:
+        if os.geteuid() != 0:
+            return
+        sudo_user = os.environ.get("SUDO_USER")
+        if not sudo_user or sudo_user == "root":
+            return
+        info = pwd.getpwnam(sudo_user)      # 查这个用户名对应的 uid/gid
+        os.chown(path, info.pw_uid, info.pw_gid)
+    except Exception:
+        pass  # 改属主失败不影响功能，忽略即可
 
 MAX_BYTES = 5 * 1024 * 1024   # 单个日志文件上限：5MB，超过就滚动
 BACKUP_COUNT = 5              # app.log 最多留 5 个历史（连当前共 6 个 ≈ 30MB 封顶）
@@ -76,12 +108,15 @@ def _make_handler(filename, backup_count):
     """造一个「按大小滚动」的文件 handler，指向 logs/<filename>。"""
     # exist_ok=True：目录已存在也不报错；每次都保证目录在（首次运行会自动建）。
     os.makedirs(LOG_DIR, exist_ok=True)
+    _chown_to_invoking_user(LOG_DIR)           # 目录属主改回启动程序的普通用户
+    log_path = os.path.join(LOG_DIR, filename)
     handler = RotatingFileHandler(
-        os.path.join(LOG_DIR, filename),
+        log_path,
         maxBytes=MAX_BYTES,
         backupCount=backup_count,
         encoding="utf-8",   # 日志里有中文，显式指定 UTF-8 避免乱码
     )
+    _chown_to_invoking_user(log_path)          # 日志文件属主也改回普通用户
     handler.setFormatter(
         logging.Formatter(
             "%(asctime)s %(levelname)s: %(message)s",

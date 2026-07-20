@@ -69,6 +69,10 @@ body {
 header, footer { max-width: 1400px; margin: 0 auto; padding: 0 20px; }
 header { padding-top: 28px; }
 
+/* 退出程序按钮条：简介下方、模块①上方，靠左 */
+.quit-bar { max-width: 1400px; margin: 0 auto 12px; padding: 0 20px; }
+.quit-bar .btn { margin: 0; }
+
 /* ---- 顶层三列平铺：① 找到对方设备 → ② 连接对方 → ③ 修改 IP，一步一列 ---- */
 .layout {
   max-width: 1400px;

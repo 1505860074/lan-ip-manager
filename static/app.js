@@ -391,6 +391,25 @@ async function showBackup() {
   out.innerHTML = html;
 }
 
+// 退出程序：请求后端关闭自己。后端会先返回 ok，再延时半秒退出进程；
+// 之后本页面的所有请求都会失败，所以这里退出后就把界面切成一个“已退出”提示页。
+async function quitApp() {
+  if (!confirm("确定要退出程序吗？退出后本页面将无法再操作，需要重新启动程序。")) return;
+  try {
+    await post("/api/quit", {});
+  } catch (e) {
+    // 后端可能在返回前就断了，忽略即可
+  }
+  // 停掉两个轮询定时器，免得它们不停地对已关闭的后端报错
+  if (scanTimer) clearInterval(scanTimer);
+  if (logTimer) clearInterval(logTimer);
+  document.body.innerHTML =
+    '<div style="max-width:640px;margin:80px auto;text-align:center;line-height:1.8">' +
+    "<h1>程序已退出</h1>" +
+    "<p>后端进程已关闭，本页面已失效。<br>如需继续使用，请重新启动程序。</p>" +
+    "<p>可以直接关闭此浏览器标签页。</p></div>";
+}
+
 // 页面一打开就加载网口列表
 loadIfaces();
 
