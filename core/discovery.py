@@ -10,10 +10,9 @@ mDNS、DHCP 请求等）本机都能收到。
 所以这里在指定网口上「被动抓包」，从抓到的包里提取对方的 MAC 和 IP ——
 这样即便网段不同，也能发现它、并知道它当前用的网段。
 
-本模块拆成三块，方便「一次性扫描」和「持续扫描」复用同一套逻辑：
+本模块拆成两块，供「持续扫描」复用：
   - update_seen(seen, pkt)  处理【一个】抓到的包，把证据累加进 seen；
-  - classify(seen)          把累积的 seen 转成排序/过滤后的设备列表；
-  - passive_discover(...)   一次性扫描 timeout 秒（内部就是上面两个的组合）。
+  - classify(seen)          把累积的 seen 转成排序/过滤后的设备列表。
 持续扫描见 core/scanner.py：它用后台线程反复调用 update_seen，前端每秒
 调 classify 取快照。
 
@@ -23,12 +22,17 @@ mDNS、DHCP 请求等）本机都能收到。
   3. 标记疑似网关：同一个 MAC 关联很多个不同源 IP 的，基本是路由器在转发，打标签。
 """
 import ipaddress
+import logging
 import time
 
-from scapy.all import ARP, IP, Ether, sniff
+from scapy.all import ARP, IP, Ether
 
 # 一个 MAC 关联的不同「源 IP」数量达到这个阈值，就判定为疑似网关（在转发流量）。
 GATEWAY_IP_THRESHOLD = 3
+
+# 应用日志（配置在 core/logsetup.py，app.py 启动时挂好 handler）。
+# 抓包在高频回调里跑，所以只在“某个 MAC 首次出现”时记一条，避免每个包都写爆日志。
+log = logging.getLogger("ipmanager")
 
 
 def _is_public(ip):
@@ -64,17 +68,23 @@ def update_seen(seen, pkt, my_mac=None):
             ip = pkt[ARP].psrc
             if not mac or not ip or ip == "0.0.0.0":
                 return
+            is_new = mac not in seen  # setdefault 前先判断，才知道是不是第一次见到
             rec = seen.setdefault(mac, {"arp_ip": None, "ip_ips": set(), "last_seen": now})
             rec["arp_ip"] = ip  # ARP 的 psrc 是设备自己声明的真实 IP，直接采用
             rec["last_seen"] = now
+            if is_new:
+                log.info("扫描发现设备 mac=%s ip=%s via=arp", mac, ip)
         elif pkt.haslayer(IP) and pkt.haslayer(Ether):
             mac = pkt[Ether].src
             ip = pkt[IP].src
             if not mac or not ip or ip == "0.0.0.0":
                 return
+            is_new = mac not in seen
             rec = seen.setdefault(mac, {"arp_ip": None, "ip_ips": set(), "last_seen": now})
             rec["ip_ips"].add(ip)
             rec["last_seen"] = now
+            if is_new:
+                log.info("扫描发现设备 mac=%s ip=%s via=ip", mac, ip)
     except Exception:
         pass
 
@@ -123,14 +133,3 @@ def classify(seen, now=None):
 
     devices.sort(key=sort_key)
     return {"devices": devices, "hidden_public": hidden_public}
-
-
-def passive_discover(iface, timeout=8, my_mac=None):
-    """一次性扫描：在 iface 上监听 timeout 秒，返回 classify() 的结果。
-
-    注意：sniff 需要 root 权限（要打开原始套接字），且默认开启混杂模式。
-    """
-    seen = {}
-    # store=False：不把包全存内存，只在回调里现场累加进 seen。
-    sniff(iface=iface, prn=lambda p: update_seen(seen, p, my_mac), timeout=timeout, store=False)
-    return classify(seen)

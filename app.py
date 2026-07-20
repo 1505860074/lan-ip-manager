@@ -17,6 +17,7 @@
     （SSH 结束、或验证完毕）立刻删掉，全程无需人工干预，也不污染本机原有配置。
 """
 import ipaddress
+import logging
 import os
 import sys
 
@@ -24,6 +25,7 @@ from flask import Flask, jsonify, render_template, request
 
 from core import netplan, remote, scanner
 from core.interfaces import list_interfaces
+from core.logsetup import read_access_log, setup_logging
 from core.netconf import (
     add_alias,
     add_host_route,
@@ -50,6 +52,12 @@ app = Flask(
     template_folder=os.path.join(_base, "templates"),
     static_folder=os.path.join(_base, "static"),
 )
+
+# 配置本地日志（写到 logs/ 下的滚动文件）。放模块顶层而非仅 __main__，是为了
+# 开发模式(FLASK_DEBUG=1)下重载器起的子进程导入本模块时也能配好日志。
+setup_logging()
+# 我们自己的应用日志：操作事件 / 错误异常都用它写；发现设备则在 discovery.py 里写。
+log = logging.getLogger("ipmanager")
 
 
 def _is_root():
@@ -177,7 +185,7 @@ def _verify_new_ip(iface, new_ip):
         return True, f"已 ping 通 {new_ip}，新 IP 生效。"
     return False, (
         f"约 10 秒内 ping 不通 {new_ip}：对方可能还没起来（可稍等再测），"
-        f"或新 IP / 网关填错。若对方还连得上，可用「还原到备份」回退；"
+        f"或新 IP / 网关填错。若对方还连得上，可点「显示备份文件」看回原配置、手动改回；"
         f"若彻底失联，只能物理接触对方恢复。"
     )
 
@@ -211,9 +219,22 @@ def api_scan_start():
     )
     try:
         scanner.session.start(iface, my_mac=my_mac)
+        log.info("开始扫描 iface=%s", iface)
         return jsonify(ok=True)
     except Exception as e:
+        log.error("开始扫描失败 iface=%s: %s", iface, e)
         return jsonify(ok=False, error=str(e))
+
+
+@app.route("/api/logs")
+def api_logs():
+    """把 logs/access.log 的新增内容吐给前端「访问日志」窗口，实现 tail -f 效果。
+
+    前端传 offset=<上次读到的字节位置>，只取增量（首次传 0 取文件末尾一小段）。
+    """
+    offset = request.args.get("offset", default=0, type=int)
+    text, new_offset = read_access_log(offset)
+    return jsonify(ok=True, text=text, offset=new_offset)
 
 
 @app.route("/api/scan_poll")
@@ -233,6 +254,7 @@ def api_scan_poll():
 def api_scan_stop():
     """停止后台抓包（结果保留，最后一次 poll 仍能取到）。"""
     scanner.session.stop()
+    log.info("停止扫描")
     return jsonify(ok=True)
 
 
@@ -257,13 +279,18 @@ def api_ssh_test():
             data["peer_ip"],
             lambda: _ssh_run(data, netplan.build_inspect_script(), force_sudo=True),
         )
+        log.info(
+            "测试连接 peer=%s user=%s rc=%s temp_used=%s",
+            data.get("peer_ip"), data.get("username"), rc, bool(temp),
+        )
         return jsonify(ok=True, rc=rc, stdout=out, stderr=err, temp_used=temp)
     except Exception as e:
+        log.error("测试连接失败 peer=%s: %s", data.get("peer_ip"), e)
         return jsonify(ok=False, error=f"SSH 连接或执行失败: {e}")
 
 
 # ---------------------------------------------------------------------------
-# ③ 修改对方 IP：预览 / 执行 / 还原（都是同一段命令，保证「所见即所跑」）
+# ③ 修改对方 IP：预览 / 执行 / 显示备份（都是同一段命令，保证「所见即所跑」）
 # ---------------------------------------------------------------------------
 @app.route("/api/change_ip", methods=["POST"])
 def api_change_ip():
@@ -287,6 +314,14 @@ def api_change_ip():
     # 全自动执行：①（需要时）临时打通到对方当前 IP → ② SSH 跑 备份/写入/应用
     #            → ③ 清理刚才的临时 IP → ④ 自动验证对方新 IP 是否 ping 得通。
     iface = data.get("iface")
+    # 记录实际生效的网关：用户填了用填的，没填则记自动推出的那个（和脚本里一致）
+    eff_gw = (data.get("gateway") or "").strip() or netplan.default_gateway_for(
+        data.get("new_ip"), data.get("new_prefix", "24"))
+    log.info(
+        "改 IP 开始 peer=%s remote_iface=%s new_ip=%s/%s gateway=%s",
+        data.get("peer_ip"), data.get("remote_iface"),
+        data.get("new_ip"), data.get("new_prefix", "24"), eff_gw or "(无)",
+    )
     try:
         (rc, out, err), temp = _with_temp_reach(
             iface,
@@ -294,11 +329,16 @@ def api_change_ip():
             lambda: _ssh_run(data, script, force_sudo=True),
         )
     except Exception as e:
+        log.error("改 IP 执行失败 peer=%s: %s", data.get("peer_ip"), e)
         return jsonify(ok=False, error=f"SSH 连接或执行失败: {e}")
 
     # 验证新 IP（同样按需把路由钉到 iface、验证完清理）
     new_ip = (data.get("new_ip") or "").strip()
     new_reachable, verify_note = _verify_new_ip(iface, new_ip)
+    log.info(
+        "改 IP 完成 peer=%s rc=%s new_ip=%s new_reachable=%s",
+        data.get("peer_ip"), rc, new_ip, new_reachable,
+    )
 
     return jsonify(
         ok=True,
@@ -313,15 +353,15 @@ def api_change_ip():
     )
 
 
-@app.route("/api/restore_ip", methods=["POST"])
-def api_restore_ip():
-    """还原到备份。preview=true 只返回命令文本、不连对方。
+@app.route("/api/show_backup", methods=["POST"])
+def api_show_backup():
+    """显示对方 /tmp/netplan-bak/ 里备份的原始 netplan 配置（只读，不改动对方）。
 
-    执行时连到「对方当前 IP」框里填的地址（改成功后对方在新 IP 上，就填新 IP）；
-    同样按需自动临时打通、用完清理。
+    连到「对方当前 IP」框里填的地址、按需自动临时打通、用完清理；把读到的备份
+    原始内容原样返回给前端显示，同时**完整写进本机日志** logs/app.log。
     """
     data = request.get_json(force=True)
-    script = netplan.build_restore_script()
+    script = netplan.build_show_backup_script()
     if data.get("preview"):
         return jsonify(ok=True, preview=True, script=script)
     try:
@@ -330,8 +370,14 @@ def api_restore_ip():
             data["peer_ip"],
             lambda: _ssh_run(data, script, force_sudo=True),
         )
+        # 把备份文件的原始内容完整写入日志（多行，故换行后原样写入，方便事后追溯）
+        log.info(
+            "显示备份文件 peer=%s rc=%s，备份原始内容如下：\n%s",
+            data.get("peer_ip"), rc, out or "（无内容）",
+        )
         return jsonify(ok=True, rc=rc, stdout=out, stderr=err, script=script, temp_used=temp)
     except Exception as e:
+        log.error("显示备份文件失败 peer=%s: %s", data.get("peer_ip"), e)
         return jsonify(ok=False, error=f"SSH 连接或执行失败: {e}")
 
 

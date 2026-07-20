@@ -39,21 +39,6 @@ function collectConn() {
   return conn;
 }
 
-// 把一次「远端执行」的结果（退出码 + 标准输出 + 标准错误）渲染到指定容器。
-function renderExec(out, r) {
-  if (!r.ok) {
-    out.innerHTML = `<span class="err">错误：${escapeHtml(r.error)}</span>`;
-    return;
-  }
-  let html = `<div class="rc ${r.rc === 0 ? "ok" : "bad"}">退出码 ${r.rc} ${
-    r.rc === 0 ? "（成功）" : "（异常）"
-  }</div>`;
-  if (r.stdout) html += `<pre class="std">${escapeHtml(r.stdout)}</pre>`;
-  if (r.stderr) html += `<pre class="stderr">${escapeHtml(r.stderr)}</pre>`;
-  if (!r.stdout && !r.stderr) html += `<pre class="std">（命令没有任何输出）</pre>`;
-  out.innerHTML = html;
-}
-
 // ===== ① 网口列表 =====
 async function loadIfaces() {
   const r = await (await fetch("/api/interfaces")).json();
@@ -92,6 +77,43 @@ function useIface(name) {
 let scanTimer = null; // setInterval 句柄
 let scanStartMs = 0; // 本轮开始时刻，用于 3 分钟安全上限
 const SCAN_MAX_MS = 180000; // 连续扫描最多 3 分钟，避免忘了停
+
+// ---- 访问日志实时回显：像 tail -f 一样，定时把 logs/access.log 的新增内容贴进 #scanLog ----
+// 是不是卡住，看上面每秒刷新的 #scanStatus 就够了；这个窗口直接显示后端 access.log
+// 的原始内容（每次请求都会写一行，扫描时每秒刷新，能看到实时在动）。
+let logTimer = null; // 拉日志的 setInterval 句柄
+let logOffset = 0; // 已读到 access.log 的字节位置，下次带上只取增量
+const LOG_POLL_MS = 1500;
+
+// 追加一行到窗口；含 ERROR 的行标红。自动滚到底。
+function appendLogLine(text) {
+  const box = document.getElementById("scanLog");
+  if (!box) return;
+  const line = document.createElement("div");
+  line.className = "logline" + (/\bERROR\b/.test(text) ? " err" : "");
+  line.textContent = text;
+  box.appendChild(line);
+  while (box.childElementCount > 500) box.removeChild(box.firstChild); // 防 DOM 堆爆
+  box.scrollTop = box.scrollHeight; // 始终滚到最新一行
+}
+
+// 拉取 access.log 从 logOffset 起的新增内容并逐行追加（页面打开即开始，一直跟）。
+async function pollLogs() {
+  let r;
+  try {
+    r = await (await fetch(`/api/logs?offset=${logOffset}`)).json();
+  } catch (e) {
+    return; // 偶发抖动，忽略这一拍
+  }
+  if (!r.ok) return;
+  logOffset = r.offset; // 无论有没有新内容都推进 offset
+  if (!r.text) return;
+  const box = document.getElementById("scanLog");
+  if (box) box.querySelectorAll(".logline.dim").forEach((el) => el.remove()); // 清占位提示
+  for (const ln of r.text.split("\n")) {
+    if (ln.length) appendLogLine(ln);
+  }
+}
 
 // 网口表里每行「扫描找设备」按钮调用它：开始（或切换到）在该口上持续扫描。
 async function scan(iface) {
@@ -331,12 +353,12 @@ function renderChangeResult(out, r) {
   }
   html += tempNote(r.temp_used);
   // 对方已搬到新 IP：确认 ping 通了，就把「对方当前 IP」自动更新为新 IP，
-  // 这样之后「测试连接」「还原到备份」连的都是对方的真实位置（而不是失效的旧 IP）。
+  // 这样之后「测试连接」「显示备份文件」连的都是对方的真实位置（而不是失效的旧 IP）。
   if (r.new_reachable === true && r.new_ip) {
     const box = document.querySelector("[name=peer_ip]");
     if (box) {
       box.value = r.new_ip;
-      html += `<div class="hint">（对方已在新 IP 上，已把「对方当前 IP」更新为 ${escapeHtml(r.new_ip)}；之后「测试连接」「还原到备份」都会连它。）</div>`;
+      html += `<div class="hint">（对方已在新 IP 上，已把「对方当前 IP」更新为 ${escapeHtml(r.new_ip)}；之后「测试连接」「显示备份文件」都会连它。）</div>`;
     }
   } else if (r.new_reachable === false && r.new_ip) {
     html += `<div class="hint">（若确认对方已搬到 ${escapeHtml(r.new_ip)}，可手动把「对方当前 IP」改成它再重试；若彻底连不上，只能物理接触对方恢复。）</div>`;
@@ -347,19 +369,31 @@ function renderChangeResult(out, r) {
   out.innerHTML = html;
 }
 
-// 还原：把之前备份的 netplan 配置拷回去并重新应用。
-async function restoreIp() {
+// 显示备份文件：只读地读取并显示对方 /tmp/netplan-bak/ 里的原始 netplan 配置，
+// 同时后端会把完整内容写进本机日志。不改动对方任何东西。
+async function showBackup() {
   const out = document.getElementById("changeOutput");
   const conn = collectConn();
   if (!conn) {
     out.innerHTML = '<span class="err">请先在第 ② 步填好「对方当前 IP」「账号」「密码」。</span>';
     return;
   }
-  if (!confirm("确认还原到之前备份的 netplan 配置吗？")) return;
-  out.innerHTML = "正在还原备份……";
-  const r = await post("/api/restore_ip", conn);
-  renderExec(out, r);
+  out.innerHTML = "正在读取对方备份文件……";
+  const r = await post("/api/show_backup", conn);
+  if (!r.ok) {
+    out.innerHTML = `<span class="err">${escapeHtml(r.error)}</span>`;
+    return;
+  }
+  let html = '<div class="rc ok">备份文件原始内容（已同时完整写入本机日志 logs/app.log）</div>';
+  html += tempNote(r.temp_used);
+  html += `<pre class="std">${escapeHtml(r.stdout || "（无内容）")}</pre>`;
+  if (r.stderr) html += `<pre class="stderr">${escapeHtml(r.stderr)}</pre>`;
+  out.innerHTML = html;
 }
 
 // 页面一打开就加载网口列表
 loadIfaces();
+
+// 页面一打开就开始跟运行日志：立刻拉一次，之后每 LOG_POLL_MS 拉增量。
+pollLogs();
+logTimer = setInterval(pollLogs, LOG_POLL_MS);

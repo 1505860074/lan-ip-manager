@@ -264,6 +264,23 @@ footer { margin-top: 24px; }
 }
 #devTable tr.gateway td { opacity: 0.6; }
 
+/* ① 扫描实时日志窗口：一个固定高度、可滚动的终端区，让用户看到扫描在持续进行、
+   没卡住。逐行 append，自动滚到底（滚动逻辑在 app.js 里）。 */
+.scanlog {
+  margin: 8px 0 4px;
+  height: 190px; overflow-y: auto;
+  background: var(--panel-deep);
+  border: 1px solid var(--line); border-radius: 0;
+  padding: 8px 10px;
+  font-family: "VT323", "Courier New", monospace;
+  font-size: 16px; line-height: 1.5;
+  color: var(--neon);
+  text-shadow: var(--glow);
+}
+.scanlog .logline { white-space: pre-wrap; word-break: break-all; margin: 1px 0; }
+.scanlog .logline.dim { color: var(--neon-dim); opacity: 0.75; }   /* 占位/提示行 */
+.scanlog .logline.err { color: var(--danger); text-shadow: 0 0 4px rgba(255,85,85,.5); } /* ERROR 行标红 */
+
 /* ---- 输出区 ---- */
 .output { margin-top: 12px; font-size: 18px; }
 .output .err { color: var(--danger); text-shadow: 0 0 4px rgba(255,85,85,.5); }

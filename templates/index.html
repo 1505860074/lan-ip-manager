@@ -67,6 +67,9 @@
       <thead><tr><th>MAC</th><th>对方 IP</th><th>来源</th><th>最近出现</th><th>操作</th></tr></thead>
       <tbody></tbody>
     </table>
+
+    <h3>访问日志</h3>
+    <div id="scanLog" class="scanlog"><div class="logline dim">（访问日志将在这里实时显示……）</div></div>
   </section>
 
   <!-- ② 连接对方 -->
@@ -124,13 +127,13 @@
       <label title="对方那台机器上要改 IP 的网口名（如 eth0），不是你本机的口；第 ② 步「测试连接」成功后一般会自动填好，没填上时照回显里的网口名手动补。">对方网口名 <small>（第 ② 步测试连接后自动填）</small> <input name="remote_iface" placeholder="第 ② 步测试连接后自动填，如 eth0"></label>
       <label title="想把对方改成的新 IP。">新 IP <input name="new_ip" placeholder="如 192.168.1.50"></label>
       <label title="子网掩码位数，通常 24。">新前缀 <input name="new_prefix" type="number" value="24"></label>
-      <label title="默认网关；只在对方需要访问其它网段/外网时才填，纯直连场景一般留空。">网关（可选） <input name="gateway" placeholder="如 192.168.1.1"></label>
+      <label title="默认网关。现在会强制配置默认网关（这样对方会持续 ARP 找网关、才好被扫描发现）：填了就用你填的；留空则自动取该网段的默认网关（网络号 + 1，如新 IP 192.168.4.200/24 就用 192.168.4.1）。具体用哪个可在下面「预览」里看到。">默认网关 <small>（留空则自动用本网段 .1）</small> <input name="gateway" placeholder="留空=自动用本网段 .1，如 192.168.4.1"></label>
     </fieldset>
 
     <div class="term-actions">
       <button class="btn" title="只显示将在对方机器上执行的完整命令，不会连接、也不改动任何东西；先看清楚再执行。" onclick="previewChange()">预览将执行的命令</button>
       <button class="btn danger" title="通过 SSH 依次执行：备份对方原配置 → 写入新 IP → 应用，全自动；新 IP 生效后当前 SSH 会断开，属正常。" onclick="runChange()">执行修改（自动备份）</button>
-      <button class="btn ghost" title="把之前自动备份的 netplan 配置整份拷回对方并重新应用，用于改错后回退；仅在对方仍连得上时有效（连的是「对方当前 IP」框里的地址）。" onclick="restoreIp()">还原到备份</button>
+      <button class="btn ghost" title="只读地读取并显示对方 /tmp/netplan-bak/ 里备份的原始 netplan 配置（不改动对方任何东西），内容会显示在下方，并完整写入本机日志 logs/app.log。" onclick="showBackup()">显示备份文件</button>
     </div>
     <pre id="previewBox" class="preview hidden"></pre>
     <div id="changeOutput" class="output"></div>
@@ -142,7 +145,7 @@
     <p class="hint">几点说明：</p>
     <ul class="hint">
       <li>改 IP 目前内置的是 <b>netplan</b> 一套流程（Ubuntu 18.04+ 默认的网络配置方式）。</li>
-      <li>执行前程序会<b>自动备份</b>对方原配置到 <code>/tmp/netplan-bak/</code>；<b>「还原到备份」</b>能把这份原配置整份拷回去。但它要先连上对方——<b>只在对方仍可达时有效</b>；若新 IP 改到<b>彻底失联</b>，还原也连不上，只能物理接触对方（接显示器+键盘或串口）恢复。</li>
+      <li>执行前程序会<b>自动备份</b>对方原配置到 <code>/tmp/netplan-bak/</code>；点<b>「显示备份文件」</b>能随时只读地查看这份原始配置（同时完整写入本机日志），万一改错需要手工恢复时，照着它填回去即可。</li>
       <li>新 IP 生效的瞬间，当前这条 SSH 连接会断开，这是<b>正常现象</b>（因为对方已经换到新 IP 上了）。</li>
     </ul>
   </footer>
