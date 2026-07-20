@@ -45,8 +45,51 @@ def default_gateway_for(new_ip, prefix="24"):
     return ""
 
 
+# 一段在对方机器上跑的 python3 代码：解析对方原来的 netplan 配置，把「由谁管网络」
+# （renderer）和「DNS 服务器」（nameservers）读出来，打印成 shell 可 eval 的赋值。
+# 为什么要保留这两样
+# ----------------
+# 之前只写一份最简静态配置、还把原配置全禁用，等于悄悄把网络管家从 NetworkManager
+# 换成了 systemd-networkd（renderer 没写就默认 networkd），也丢掉了原来的 DNS。
+# NetworkManager 会周期性做联网检查、为查 DNS 反复 ARP 找网关——设备正是靠这个被扫描
+# 发现的。换成安静的 networkd 后设备就“哑”了、扫不到了。所以改 IP 时必须原样保留它们。
+#
+# 读取来源按优先级找：当前 *.yaml → 被本工具禁用的 *.ipmbak → /tmp 备份。这样无论是
+# 第一次改（原配置还在 *.yaml），还是对已改过的设备再改（原值只剩在 .ipmbak/备份里），
+# 都能把原来的 renderer/nameservers 找回来。没装 python-yaml 时，renderer 还有 grep 兜底。
+_CAPTURE_PY = """import sys, glob
+try:
+    import yaml
+except Exception:
+    print("RENDERER=''"); print("NS=''"); sys.exit(0)
+iface = sys.argv[1]
+files = (sorted(glob.glob('/etc/netplan/*.yaml'))
+         + sorted(glob.glob('/etc/netplan/*.ipmbak'))
+         + sorted(glob.glob('/tmp/netplan-bak/*.yaml')))
+renderer = ''
+ns = []
+for f in files:
+    try:
+        with open(f) as fh:
+            d = yaml.safe_load(fh) or {}
+    except Exception:
+        continue
+    net = d.get('network', {}) or {}
+    if not renderer and net.get('renderer'):
+        renderer = str(net['renderer'])
+    eth = (net.get('ethernets') or {}).get(iface, {}) or {}
+    addrs = ((eth.get('nameservers') or {}).get('addresses')) or []
+    if not ns and addrs:
+        ns = [str(a) for a in addrs]
+renderer = ''.join(c for c in renderer if c.isalnum())   # 只留字母数字，防注入
+ns = ','.join(a for a in ns if all(c.isdigit() or c in '.:abcdefABCDEF' for c in a))
+print("RENDERER='%s'" % renderer)
+print("NS='%s'" % ns)
+"""
+
+
 def build_change_script(iface, new_ip, prefix="24", gateway=""):
-    """生成「备份 -> 写入新配置 -> 后台应用」的完整脚本文本。
+    """生成「读原配置 -> 备份 -> 禁用旧配置 -> 写入新配置 -> 后台应用」的完整脚本文本。
 
     参数都来自界面表单；iface / new_ip 必填，缺了会抛 ValueError，
     由上层转成「请先填写…」的友好提示。
@@ -54,6 +97,9 @@ def build_change_script(iface, new_ip, prefix="24", gateway=""):
     默认网关是**强制**配置的（这样对方会持续 ARP 找网关、才能被扫描发现）：
       - 用户填了 gateway 就用用户的；
       - 用户留空则自动取该网段的默认网关（default_gateway_for，网络号 + 1）。
+
+    另外会**保留原配置的 renderer 和 nameservers**（见 _CAPTURE_PY 的说明），
+    避免把设备的网络管家从 NetworkManager 悄悄换成安静的 networkd、导致它扫不到。
     """
     iface = (iface or "").strip()
     new_ip = (new_ip or "").strip()
@@ -65,47 +111,63 @@ def build_change_script(iface, new_ip, prefix="24", gateway=""):
     # 用户没填网关就按网段自动取一个；netplan v2 用 routes 配默认网关（老的 gateway4 已废弃）。
     if not gateway:
         gateway = default_gateway_for(new_ip, prefix)
-    routes = ""
-    if gateway:
-        routes = (
-            "\n      routes:"
-            "\n        - to: default"
-            f"\n          via: {gateway}"
-        )
-
-    yaml = (
-        "network:\n"
-        "  version: 2\n"
-        "  ethernets:\n"
-        f"    {iface}:\n"
-        "      dhcp4: false\n"
-        f"      addresses: [{new_ip}/{prefix}]"
-        + routes
-    )
 
     return "\n".join([
+        "# 这些值来自界面表单，先放进 shell 变量，后面拼配置时用。",
+        f"IFACE='{iface}'",
+        f"NEWIP='{new_ip}'",
+        f"PREFIX='{prefix}'",
+        f"GATEWAY='{gateway}'",
+        "",
         f"# 第①步 先删掉本工具上次可能写过的文件（避免它被当成“原配置”备份/禁用）",
         f"rm -f {DROPIN}",
         "",
-        f"# 第②步 备份现有 netplan 配置到 {BACKUP_DIR}（此时只剩对方真正的原配置）",
+        "# 第②步 读出对方原来的 renderer（谁管网络）和 nameservers（DNS），一会儿原样保留。",
+        f"cat > /tmp/ipm_capture.py <<'PYEOF'\n{_CAPTURE_PY}PYEOF",
+        'eval "$(python3 /tmp/ipm_capture.py "$IFACE" 2>/dev/null)"',
+        "rm -f /tmp/ipm_capture.py",
+        "# 兜底：python-yaml 缺失导致 RENDERER 为空时，用 grep 从原/备份文件里抠出 renderer。",
+        'if [ -z "$RENDERER" ]; then',
+        "  RENDERER=$(grep -h -oiE 'renderer:[[:space:]]*(networkmanager|networkd)' "
+        "/etc/netplan/*.yaml /etc/netplan/*.ipmbak /tmp/netplan-bak/*.yaml 2>/dev/null "
+        "| grep -oiE '(networkmanager|networkd)' | head -1)",
+        "fi",
+        'echo "将保留 renderer=${RENDERER:-(未设置,用 netplan 默认)} nameservers=${NS:-(无)}"',
+        "",
+        f"# 第③步 备份现有 netplan 配置到 {BACKUP_DIR}（此时只剩对方真正的原配置）",
         f"mkdir -p {BACKUP_DIR}",
         f"cp /etc/netplan/*.yaml {BACKUP_DIR}/ 2>/dev/null || true",
         "",
-        "# 第③步 禁用原有配置：把每个 *.yaml 改名成 *.ipmbak，让 netplan 忽略它们。",
+        "# 第④步 禁用原有配置：把每个 *.yaml 改名成 *.ipmbak，让 netplan 忽略它们。",
         "#        这是“真替换”的关键——否则旧文件里的旧 IP 会和新 IP 合并、一起残留。",
         "for f in /etc/netplan/*.yaml; do",
         '  [ -e "$f" ] || continue          # 没有任何 .yaml 时，通配符不展开，跳过',
         f'  mv "$f" "$f{DISABLED_SUFFIX}"',
         "done",
         "",
-        f"# 第④步 写入新配置到 {DROPIN}（现在它是唯一生效的 netplan 文件）",
-        f"cat > {DROPIN} <<'EOF'",
-        yaml,
-        "EOF",
+        f"# 第⑤步 写入新配置到 {DROPIN}（逐行拼装，好把上面保留的 renderer/nameservers 塞进去）",
+        "{",
+        '  echo "network:"',
+        '  echo "  version: 2"',
+        '  [ -n "$RENDERER" ] && echo "  renderer: $RENDERER"',
+        '  echo "  ethernets:"',
+        '  echo "    $IFACE:"',
+        '  echo "      dhcp4: false"',
+        '  echo "      addresses: [$NEWIP/$PREFIX]"',
+        '  if [ -n "$GATEWAY" ]; then',
+        '    echo "      routes:"',
+        '    echo "        - to: default"',
+        '    echo "          via: $GATEWAY"',
+        "  fi",
+        '  if [ -n "$NS" ]; then',
+        '    echo "      nameservers:"',
+        '    echo "        addresses: [$NS]"',
+        "  fi",
+        f"}} > {DROPIN}",
         f"chmod 600 {DROPIN}",
         f"echo '已写入 {DROPIN}：'; cat {DROPIN}",
         "",
-        "# 第⑤步 后台应用（sleep 2 让这条 SSH 先干净返回；IP 一变当前连接就会断，属正常）",
+        "# 第⑥步 后台应用（sleep 2 让这条 SSH 先干净返回；IP 一变当前连接就会断，属正常）",
         "nohup sh -c 'sleep 2; netplan apply' >/tmp/ipmanager_apply.log 2>&1 &",
         "echo '已提交：约 2 秒后新 IP 生效，本条 SSH 会随之断开，属正常现象。'",
     ])
