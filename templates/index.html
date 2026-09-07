@@ -12,12 +12,6 @@
   <div class="bg-layer"></div>
   <header>
     <h1>局域网设备 IP 管理面板</h1>
-    <p class="hint">
-      <b>这个面板是做什么的？</b>
-      当你用一根网线，把这台电脑和另一台 Linux 设备（比如机器人、工控机）直接对连，
-      但对方的 IP 你不知道、或它和你不在同一网段、平时根本连不上时——
-      用它就能<b>把对方找出来、确认能登录、再把它的 IP 改成你想要的</b>。
-    </p>
     <p id="rootWarn" class="warn hidden">
       【警告】当前不是以 root 运行，扫描和调整网段会失败，请用 <code>sudo</code> 启动本程序。
     </p>
@@ -34,39 +28,25 @@
   <!-- ① 找到对方设备（选口 + 扫描 + 结果，一个面板串起来） -->
   <section id="step1">
     <h2><span class="step-badge">1</span> 找到对方设备</h2>
-    <p class="hint">
-      先在下面「本机网口」表里，找到<b>「网线」列显示「已连」</b>的那一行——
-      那就是插了网线、正连着对方设备的网口。然后：
-    </p>
-    <ol class="hint">
-      <li>点这一行右边的<b>「扫描找设备」</b>按钮。</li>
-      <li>程序会在这个口上<b>持续监听</b>对方发出的广播包。</li>
-      <li>这个口会<b>自动填进第 ② 步的「本机直连网口」</b>，之后连对方时要用。</li>
-      <li>找到对方后，点<b>「停止扫描」</b>结束监听即可。</li>
-    </ol>
-
     <div class="row-tools">
       <button class="btn" onclick="loadIfaces()">刷新网口</button>
     </div>
 
-    <h3>本机网口 <small>（点「已连」口那行的「扫描找设备」）</small></h3>
+    <h3>本机网口 <small>（点某一行选中它，操作按钮会在下方展开）</small></h3>
     <table id="ifaceTable">
-      <thead><tr><th>网口</th><th>网线</th><th>状态</th><th>当前 IP</th><th>操作</th></tr></thead>
+      <thead><tr><th>网口</th><th>网线</th><th>状态</th><th>当前 IP</th></tr></thead>
       <tbody></tbody>
     </table>
+    <div id="localResult" class="output"></div>
 
     <h3>扫描发现的设备
-      <button id="stopScanBtn" class="btn ghost hidden" title="点了就停止后台监听；已经发现的设备仍保留在下方列表里。" onclick="stopScan()">停止扫描</button>
+      <button id="stopScanBtn" class="btn hidden" title="点了就停止后台监听；已经发现的设备仍保留在下方列表里。" onclick="stopScan()">停止扫描</button>
     </h3>
-    <p class="hint">这张表是<b>「当前在线」的实时视图</b>：</p>
     <ul class="hint">
       <li>每秒刷新；某设备<b>超过 20 秒</b>没再出现（比如拔了线），会自动从表里移除。</li>
       <li><b>「来源」列</b>：<b>ARP · 可信</b> 是设备自己声明的 IP，最靠谱；<b>IP包 · 参考</b> 是推测出来的，仅供参考。</li>
       <li>连续扫描超过 <b>3 分钟</b> 会自动停止，避免你忘了关；想继续再点一次「扫描找设备」即可。</li>
     </ul>
-    <p class="hint">
-      找到你要改的那台后，点它这一行的<b>「选为目标」</b>——它的 IP 会自动填进第 ② 步的「对方当前 IP」；然后点「停止扫描」即可。
-    </p>
     <div id="scanStatus" class="status"></div>
     <table id="devTable">
       <thead><tr><th>MAC</th><th>对方 IP</th><th>来源</th><th>最近出现</th><th>操作</th></tr></thead>
@@ -80,7 +60,6 @@
   <!-- ② 连接对方 -->
   <section id="step3">
     <h2><span class="step-badge">2</span> 测试网络连接</h2>
-    <p class="hint">在这里用对方的账号密码登录它，先确认「连得上、能登录」，再去第 ③ 步改 IP。</p>
 
     <fieldset>
       <legend>本机（你这台电脑）</legend>
@@ -98,13 +77,9 @@
 
     <fieldset>
       <legend>测试连接（只读，不改动对方）</legend>
-      <p class="hint">
-        点下面「测试连接」会登录对方，<b>只读地</b>回显它的主机名和网络配置（<b>不改动任何东西</b>）；
-        成功后会自动把对方网口名<b>填进第 ③ 步</b>。
-      </p>
       <div class="term-actions">
-        <button class="btn" title="只显示「测试连接」将在对方机器上执行的命令，不会连接、也不改动任何东西；先看清楚再执行。" onclick="previewTest()">预览将执行的命令</button>
-        <button class="btn danger" title="用上面填的账号密码登录对方，只读显示它的主机名、网口、netplan 配置，不改动任何东西；两边网段不同时会自动临时打通、用完清理。" onclick="sshTest()">测试连接并查看对方信息</button>
+        <button class="btn" title="只显示「测试连接」将在对方机器上执行的命令，不会连接、也不改动任何东西；先看清楚再执行。" onclick="previewTest()">预览命令</button>
+        <button class="btn danger" title="用上面填的账号密码登录对方，只读显示它的主机名、网口、netplan 配置，不改动任何东西；两边网段不同时会自动临时打通、用完清理。" onclick="sshTest()">测试连接</button>
       </div>
       <pre id="testPreviewBox" class="preview hidden"></pre>
       <div id="testOutput" class="output"></div>
@@ -115,7 +90,6 @@
   <section id="step4">
     <h2><span class="step-badge">3</span> 修改对方 IP</h2>
     <p class="hint">
-      填好要把对方改成的新 IP，先点<b>「预览」</b>看清将在对方机器上执行的命令，确认无误后再点<b>「执行」</b>。
       执行是<b>全自动</b>的，会依次完成：
     </p>
     <ol class="hint">
@@ -136,9 +110,9 @@
     </fieldset>
 
     <div class="term-actions">
-      <button class="btn" title="只显示将在对方机器上执行的完整命令，不会连接、也不改动任何东西；先看清楚再执行。" onclick="previewChange()">预览将执行的命令</button>
-      <button class="btn danger" title="通过 SSH 依次执行：备份对方原配置 → 写入新 IP → 应用，全自动；新 IP 生效后当前 SSH 会断开，属正常。" onclick="runChange()">执行修改（自动备份）</button>
-      <button class="btn ghost" title="只读地读取并显示对方 /tmp/netplan-bak/ 里备份的原始 netplan 配置（不改动对方任何东西），内容会显示在下方，并完整写入本机日志 logs/app.log。" onclick="showBackup()">显示备份文件</button>
+      <button class="btn" title="只显示将在对方机器上执行的完整命令，不会连接、也不改动任何东西；先看清楚再执行。" onclick="previewChange()">预览命令</button>
+      <button class="btn danger" title="通过 SSH 依次执行：备份对方原配置 → 写入新 IP → 应用，全自动；新 IP 生效后当前 SSH 会断开，属正常。" onclick="runChange()">执行修改</button>
+      <button class="btn" title="只读地读取并显示对方 /tmp/netplan-bak/ 里备份的原始 netplan 配置（不改动对方任何东西），内容会显示在下方，并完整写入本机日志 logs/app.log。" onclick="showBackup()">显示备份</button>
     </div>
     <pre id="previewBox" class="preview hidden"></pre>
     <div id="changeOutput" class="output"></div>
@@ -150,7 +124,7 @@
     <p class="hint">几点说明：</p>
     <ul class="hint">
       <li>改 IP 目前内置的是 <b>netplan</b> 一套流程（Ubuntu 18.04+ 默认的网络配置方式）。</li>
-      <li>执行前程序会<b>自动备份</b>对方原配置到 <code>/tmp/netplan-bak/</code>；点<b>「显示备份文件」</b>能随时只读地查看这份原始配置（同时完整写入本机日志），万一改错需要手工恢复时，照着它填回去即可。</li>
+      <li>执行前程序会<b>自动备份</b>对方原配置到 <code>/tmp/netplan-bak/</code>；点<b>「显示备份」</b>能随时只读地查看这份原始配置（同时完整写入本机日志），万一改错需要手工恢复时，照着它填回去即可。</li>
       <li>新 IP 生效的瞬间，当前这条 SSH 连接会断开，这是<b>正常现象</b>（因为对方已经换到新 IP 上了）。</li>
     </ul>
   </footer>

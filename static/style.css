@@ -67,10 +67,10 @@ body {
 }
 
 header, footer { max-width: 1400px; margin: 0 auto; padding: 0 20px; }
-header { padding-top: 28px; }
+header { padding-top: 28px; text-align: center; }   /* 主标题 + 警告居中，做成一条整洁的横幅 */
 
-/* 退出程序按钮条：简介下方、模块①上方，靠左 */
-.quit-bar { max-width: 1400px; margin: 0 auto 12px; padding: 0 20px; }
+/* 退出程序按钮条：与标题横幅同宽，按钮靠右（类似窗口右上角的关闭位） */
+.quit-bar { max-width: 1400px; margin: 0 auto 12px; padding: 0 20px; text-align: right; }
 .quit-bar .btn { margin: 0; }
 
 /* ---- 顶层三列平铺：① 找到对方设备 → ② 连接对方 → ③ 修改 IP，一步一列 ---- */
@@ -111,7 +111,11 @@ h2 {
   margin-top: 30px;
 }
 h2::before { content: "\258D "; color: var(--neon); }   /* ▍ 终端块状光标点缀 */
-h3 { font-size: 22px; color: var(--neon-hi); margin: 0 0 10px; }
+/* 每个面板顶端的第一个 h2 收紧上边距，让三列的标题在同一高度整齐起步 */
+.layout > section > h2:first-child { margin-top: 4px; }
+/* 面板内的 h3 与上一块内容留出统一间距，第一个 h3 紧跟标题则不额外拉开 */
+h3 { font-size: 22px; color: var(--neon-hi); margin: 22px 0 10px; }
+section > h3:first-of-type { margin-top: 14px; }
 
 .hint { color: var(--neon-dim); font-size: 17px; margin: 4px 0 10px; }
 /* 说明文字里的分点列表：与荧光蓝正文同色，逐条分行，避免挤成一坨、便于阅读 */
@@ -152,9 +156,19 @@ th {
   color: var(--neon-dim); text-transform: uppercase; letter-spacing: 1px;
   white-space: nowrap;          /* 表头短词不换行（如「网线」不被拆成两行） */
 }
-/* 表格里的操作按钮：整体不换行 + 去掉外边距 + 收紧内边距，
-   避免窄列里「扫描找设备」被压成一个字一行的竖排。 */
+/* 表格里的操作按钮：整体不换行 + 去掉外边距 + 收紧内边距。 */
 td .btn { white-space: nowrap; margin: 0; padding: 4px 10px; }
+
+/* ---- 表格列对齐：文字/地址列左对齐；短状态列、来源列、操作列居中，整齐好扫读 ---- */
+/* 本机网口表：网口(左) | 网线(中) | 状态(中) | 当前 IP(左) */
+#ifaceTable th:nth-child(2), #ifaceTable td:nth-child(2),
+#ifaceTable th:nth-child(3), #ifaceTable td:nth-child(3) { text-align: center; }
+/* 扫描发现的设备表：MAC(左) | 对方 IP(左) | 来源(中) | 最近出现(中) | 操作(中) */
+#devTable th:nth-child(3), #devTable td:nth-child(3),
+#devTable th:nth-child(4), #devTable td:nth-child(4),
+#devTable th:nth-child(5), #devTable td:nth-child(5) { text-align: center; }
+/* 居中列里的按钮/内容随之居中对齐 */
+#devTable td:nth-child(5) .btn { display: inline-block; }
 
 /* ---- 按钮：直角、边框、悬停反色 ---- */
 .btn {
@@ -180,8 +194,6 @@ td .btn { white-space: nowrap; margin: 0; padding: 4px 10px; }
 .btn:disabled:hover { background: transparent; color: var(--line); }
 .btn.danger { border-color: var(--danger); color: var(--danger); text-shadow: 0 0 4px rgba(255,85,85,.5); }
 .btn.danger:hover { background: var(--danger); color: var(--bg); }
-.btn.ghost { border-color: var(--line); color: var(--neon-dim); }
-.btn.ghost:hover { background: var(--line); color: var(--neon-hi); }
 
 /* ---- 表单：label 块级竖排，输入框在各自模块里自上而下排成一列 ---- */
 label {
@@ -231,11 +243,99 @@ footer { margin-top: 24px; }
 /* ① 网口表里「已连」的整行淡蓝高亮，让人一眼锁定该用哪个口 */
 #ifaceTable tr.connected td { background: rgba(31, 240, 255, 0.10); }
 
-/* ③ 修改 IP 的一排操作按钮 */
-.term-actions {
-  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-  margin-top: 12px;
+/* ① 网口行整行可点击选中 */
+#ifaceTable tr.iface-row { cursor: pointer; }
+#ifaceTable tr.iface-row:hover td { background: rgba(31, 240, 255, 0.06); }
+
+/* 行首「▶」选中标记：默认藏起来，只有被选中的行才显示、发光 */
+.sel-mark {
+  display: inline-block; width: 1em; margin-right: 4px;
+  color: var(--neon-hi); opacity: 0; text-shadow: 0 0 6px rgba(31, 240, 255, 0.9);
 }
+#ifaceTable tr.iface-row.selected .sel-mark { opacity: 1; }
+
+/* 被选中的网口行：更亮的底色 + 左侧一道高亮竖条 + 加粗，和普通行/已连行明显区分 */
+#ifaceTable tr.iface-row.selected td {
+  background: rgba(31, 240, 255, 0.20);
+  color: var(--neon-hi);
+  font-weight: bold;
+}
+#ifaceTable tr.iface-row.selected td:first-child {
+  box-shadow: inset 4px 0 0 0 var(--neon);
+}
+
+/* ---- ① 本机 IP 配置：当前 IP 逐条显示 + 来源标签 + 删除按钮 ---- */
+.ipitem { display: flex; align-items: center; gap: 6px; margin: 2px 0; white-space: nowrap; }
+/* 来源小标签：永久=青、DHCP=琥珀、临时=淡青 */
+.ipkind {
+  display: inline-block; font-size: 12px; line-height: 1.4;
+  padding: 0 5px; border: 1px solid var(--line); text-shadow: none;
+}
+.ipkind.perm { border-color: var(--neon); color: var(--neon-hi); }
+.ipkind.dhcp { border-color: var(--amber); color: var(--amber); }
+.ipkind.temp { border-color: var(--neon-dim); color: var(--neon-dim); }
+/* 每条地址后的「删除」按钮做小一点，不喧宾夺主 */
+.btn.ipdel { padding: 1px 9px; font-size: 15px; margin: 0; }
+
+/* 配置面板顶部的「本机网口现有 IP」列表：逐条地址 + 来源标签 + 删除按钮。
+   删除按钮从常显的表格列挪到这里，避免误点删掉地址。 */
+.cfg-iplist {
+  border: 1px solid var(--line);
+  background: var(--panel-deep);
+  padding: 8px 10px;
+}
+.cfg-iplist-title { color: var(--neon-dim); font-size: 15px; margin-bottom: 6px; }
+.cfg-ip-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 3px 0; white-space: nowrap;
+  border-top: 1px dashed rgba(31, 143, 166, 0.4);   /* 每条之间一道虚线，方便对齐看清 */
+}
+.cfg-ip-row:first-of-type { border-top: none; }
+.cfg-ip-addr { min-width: 12em; color: var(--neon-hi); }   /* 地址列对齐，删除按钮竖排成一列 */
+.cfg-ip-empty { color: var(--neon-dim); opacity: 0.75; font-size: 15px; }
+
+/* 选中网口后在其下方展开的「详情行」：视觉上是选中那一栏往下延伸的一部分——
+   用和选中行相同的高亮底色，左侧接上同一道高亮竖条，读起来是一整块「被选中的栏」，
+   而不是一个浮在两行之间、脱节的小盒子。 */
+#ifaceTable tr.detail-row td {
+  background: rgba(31, 240, 255, 0.20);
+  box-shadow: inset 4px 0 0 0 var(--neon);   /* 与选中行 td:first-child 的左竖条对齐相连 */
+  padding: 8px 12px 12px;
+}
+/* 选中行与它的详情行之间不画分隔线，让两者连成一体 */
+#ifaceTable tr.iface-row.selected td { border-bottom: none; }
+/* 统一的「操作按钮条」：一排按钮横向平均分宽、居中文字、不换行。
+   详情行的操作（.iface-actions）和 ②③ 步的操作（.term-actions）都用它，样式一致。
+   font-size 放在容器上、按钮 inherit 它，方便 JS 在按钮变多、文字挤不下时整体缩小字号。 */
+.iface-actions, .term-actions {
+  display: flex; gap: 8px; align-items: stretch;
+  font-size: 18px;             /* 基准字号；fitActionBar() 会在放不下时把它调小 */
+}
+.iface-actions .btn, .term-actions .btn {
+  flex: 1 1 0;                 /* 每个按钮等分容器宽度，不论文字多长 */
+  min-width: 0;                /* 允许被压窄，否则 flex 项默认不会小于内容宽度 */
+  font-size: inherit;          /* 跟随容器字号，JS 调容器即可整体缩放 */
+  text-align: center;
+  white-space: nowrap;         /* 文字不换行——放不下时靠缩小字号解决，而不是折行 */
+  overflow: hidden; text-overflow: ellipsis;   /* 极端情况下的兜底，避免溢出撑破布局 */
+  margin: 0;
+}
+/* 配置面板与上方按钮行留点间距 */
+.cfg-panel { margin-top: 10px; }
+.local-cfg { display: flex; flex-direction: column; gap: 8px; }
+.cfg-line { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+/* 面板里的 label 改成行内排列（默认 label 是块级竖排，这里要横排更紧凑） */
+.local-cfg label.inline { display: inline-flex; align-items: center; gap: 4px; margin: 0; }
+.local-cfg label.inline input[type="text"],
+.local-cfg label.inline input:not([type]),
+.local-cfg label.inline input[type="number"] {
+  display: inline-block; width: auto; margin: 0;
+}
+.local-cfg .cfg-ip { width: 12em; }
+.local-cfg input[type="radio"] { width: auto; display: inline-block; margin: 0; }
+
+/* ②③ 步的操作按钮条：与详情行按钮条同样式（见上），这里只补一点上边距 */
+.term-actions { margin-top: 12px; }
 
 /* ③「预览将执行的命令」框：虚线边框，和真正的输出区区分开 */
 .preview {

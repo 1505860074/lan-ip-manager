@@ -29,7 +29,7 @@ import webbrowser
 
 from flask import Flask, jsonify, render_template, request
 
-from core import netplan, remote, scanner
+from core import localnet, netplan, remote, scanner
 from core.interfaces import list_interfaces
 from core.sysutil import clean_env
 from core.logsetup import read_access_log, setup_logging
@@ -225,6 +225,97 @@ def api_interfaces():
         return jsonify(ok=True, root=_is_root(), interfaces=list_interfaces())
     except Exception as e:
         return jsonify(ok=False, error=str(e))
+
+
+# ---------------------------------------------------------------------------
+# 配置「本机自己」网口的 IP：临时(ip addr)/永久(netplan)，新增别名 / 改主 IP / 删除。
+# 这几件事都要 root（改本机网络），失败统一转成 ok=False + 友好文案。
+# ---------------------------------------------------------------------------
+def _require_root():
+    """不是 root 时返回一段友好错误 json；是 root 返回 None。"""
+    if not _is_root():
+        return jsonify(ok=False, error="需要以 root 运行才能修改本机网口，请用 sudo 启动本程序。")
+    return None
+
+
+@app.route("/api/local/add_ip", methods=["POST"])
+def api_local_add_ip():
+    """给本机某网口新增一个别名 IP。persist=True 写 netplan(永久)，否则 ip addr(临时)。"""
+    err = _require_root()
+    if err:
+        return err
+    data = request.get_json(force=True)
+    iface = (data.get("iface") or "").strip()
+    persist = bool(data.get("persist"))
+    if not iface:
+        return jsonify(ok=False, error="缺少网口名。")
+    try:
+        ip, prefix = localnet.validate_ip_prefix(data.get("ip"), data.get("prefix"))
+        if persist:
+            msg = localnet.add_ip_permanent(iface, ip, prefix)
+        else:
+            msg = localnet.add_ip_temp(iface, ip, prefix)
+    except (ValueError, RuntimeError) as e:
+        log.error("本机新增 IP 失败 iface=%s persist=%s: %s", iface, persist, e)
+        return jsonify(ok=False, error=str(e))
+    log.info("本机新增 IP iface=%s ip=%s/%s persist=%s", iface, ip, prefix, persist)
+    return jsonify(ok=True, message=msg)
+
+
+@app.route("/api/local/change_main", methods=["POST"])
+def api_local_change_main():
+    """替换本机某网口的主 IP。persist=True 写 netplan(可带网关/DNS)，否则 ip addr 临时。"""
+    err = _require_root()
+    if err:
+        return err
+    data = request.get_json(force=True)
+    iface = (data.get("iface") or "").strip()
+    persist = bool(data.get("persist"))
+    if not iface:
+        return jsonify(ok=False, error="缺少网口名。")
+    try:
+        new_ip, new_prefix = localnet.validate_ip_prefix(
+            data.get("new_ip"), data.get("new_prefix"))
+        if persist:
+            # 网关 / DNS 的合法性校验放在 localnet 内部做（传字符串也能正确切分）。
+            msg = localnet.change_main_ip_permanent(
+                iface, new_ip, new_prefix,
+                gateway=data.get("gateway"), dns=data.get("dns"))
+        else:
+            # 临时改主：删掉前端传来的旧主地址，再加新地址（旧地址留空则等于纯新增）。
+            old_ip = (data.get("old_ip") or "").strip()
+            old_prefix = data.get("old_prefix") or new_prefix
+            msg = localnet.change_main_ip_temp(
+                iface, old_ip, old_prefix, new_ip, new_prefix)
+    except (ValueError, RuntimeError) as e:
+        log.error("本机改主 IP 失败 iface=%s persist=%s: %s", iface, persist, e)
+        return jsonify(ok=False, error=str(e))
+    log.info("本机改主 IP iface=%s new=%s/%s persist=%s", iface, new_ip, new_prefix, persist)
+    return jsonify(ok=True, message=msg)
+
+
+@app.route("/api/local/del_ip", methods=["POST"])
+def api_local_del_ip():
+    """删除本机某网口上的一个地址。permanent=True 从 netplan 删，否则 ip addr 临时删。"""
+    err = _require_root()
+    if err:
+        return err
+    data = request.get_json(force=True)
+    iface = (data.get("iface") or "").strip()
+    permanent = bool(data.get("permanent"))
+    if not iface:
+        return jsonify(ok=False, error="缺少网口名。")
+    try:
+        ip, prefix = localnet.validate_ip_prefix(data.get("ip"), data.get("prefix"))
+        if permanent:
+            msg = localnet.del_ip_permanent(iface, ip, prefix)
+        else:
+            msg = localnet.del_ip_temp(iface, ip, prefix)
+    except (ValueError, RuntimeError) as e:
+        log.error("本机删除 IP 失败 iface=%s permanent=%s: %s", iface, permanent, e)
+        return jsonify(ok=False, error=str(e))
+    log.info("本机删除 IP iface=%s ip=%s/%s permanent=%s", iface, ip, prefix, permanent)
+    return jsonify(ok=True, message=msg)
 
 
 @app.route("/api/scan_start", methods=["POST"])

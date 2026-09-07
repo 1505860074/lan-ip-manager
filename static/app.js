@@ -40,6 +40,20 @@ function collectConn() {
 }
 
 // ===== ① 网口列表 =====
+
+// 把网口名转成只含字母数字的安全串，用来拼 DOM 的 id（网口名一般已是字母数字，
+// 但保险起见把别的字符换成下划线，避免拼出非法/歧义的选择器）。
+function safeId(name) {
+  return String(name).replace(/[^A-Za-z0-9]/g, "_");
+}
+
+// 来源标签：把后端给的 kind 显示成中文小标签。
+function kindTag(kind) {
+  if (kind === "permanent") return '<span class="ipkind perm">永久</span>';
+  if (kind === "dhcp") return '<span class="ipkind dhcp">DHCP</span>';
+  return '<span class="ipkind temp">临时</span>'; // manual
+}
+
 async function loadIfaces() {
   const r = await (await fetch("/api/interfaces")).json();
   // 顶部 root 警告：不是 root 才显示
@@ -48,24 +62,271 @@ async function loadIfaces() {
   const tb = document.querySelector("#ifaceTable tbody");
   tb.innerHTML = "";
   if (!r.ok) {
-    tb.innerHTML = `<tr><td colspan="5">错误：${r.error}</td></tr>`;
+    tb.innerHTML = `<tr><td colspan="4">错误：${r.error}</td></tr>`;
     return;
   }
+  _lastIfaces = r.interfaces; // 缓存，供「临时改主 IP」取旧地址用
   for (const i of r.interfaces) {
+    const sid = safeId(i.name);
+
+    // 「当前 IP」列：只逐条显示地址 + 来源标签（无 IP 时显示 -）。
+    // 删除按钮不放这里——常显列里太容易误点删掉地址；删除移到「配置本机 IP」面板内。
+    let ipCell = "-";
+    const det = i.ip_detail || [];
+    if (det.length) {
+      ipCell = det
+        .map((d) => `<div class="ipitem">${d.cidr} ${kindTag(d.kind)}</div>`)
+        .join("");
+    }
+
+    // 网口主行：整行可点击选中；未选中时不显示任何操作按钮。
     const tr = document.createElement("tr");
-    if (i.carrier) tr.classList.add("connected"); // 已连网口整行高亮，一眼看到
-    // 插了网线才能扫描；灰按钮也带上 title 说明为什么不能点
+    tr.className = "iface-row";
+    if (i.carrier) tr.classList.add("connected"); // 已连网口整行淡蓝高亮，一眼看到
+    tr.dataset.iface = i.name;
+    tr.dataset.sid = sid;
+    tr.onclick = () => selectIface(i.name);
+    tr.innerHTML = `
+      <td><span class="sel-mark">▶</span>${i.name}</td>
+      <td>${i.carrier ? "<b>已连</b>" : "未连"}</td>
+      <td>${i.operstate}</td>
+      <td>${ipCell}</td>`;
+    tb.appendChild(tr);
+
+    // 紧跟一行「详情行」：默认随行收起，选中该行才展开。
+    // 里面放操作按钮（扫描找设备 / 配置本机 IP）+ 配置面板，横跨整表宽度，不再挤在窄列里。
     const scanBtn = i.carrier
       ? `<button class="btn" title="在这个网口上监听，找出直连的对方设备；同时把它自动填进第 ② 步的「本机直连网口」。" onclick="scan('${i.name}')">扫描找设备</button>`
       : `<button class="btn" disabled title="该口未插网线（未连），无法扫描。">扫描找设备</button>`;
-    tr.innerHTML = `
-      <td>${i.name}</td>
-      <td>${i.carrier ? "<b>已连</b>" : "未连"}</td>
-      <td>${i.operstate}</td>
-      <td>${i.addresses.join("<br>") || "-"}</td>
-      <td>${scanBtn}</td>`;
-    tb.appendChild(tr);
+    const cfgBtn = `<button class="btn" title="给这个网口新增 IP / 改主 IP（临时或永久）。" onclick="toggleCfg('${i.name}')">配置本机 IP</button>`;
+
+    // 配置面板默认收起；若这个网口的面板在重绘前是打开的，则保持打开（删完一个 IP
+    // 会重绘整张表，不保持的话面板会跟着收起，连删多个很别扭）。
+    const cfgHidden = openCfgIfaces.has(i.name) ? "" : " hidden";
+    const detail = document.createElement("tr");
+    detail.className = "detail-row hidden";
+    detail.id = `detail-${sid}`;
+    detail.innerHTML =
+      `<td colspan="4">` +
+      `<div class="iface-actions">${scanBtn}${cfgBtn}</div>` +
+      `<div id="cfg-${sid}" class="cfg-panel${cfgHidden}">${cfgPanelHtml(i.name, sid, det)}</div>` +
+      `</td>`;
+    tb.appendChild(detail);
   }
+
+  // 保证有且仅有一个网口被选中：沿用上次选中的口；若它已不在（或首次加载）就选第一个。
+  const names = r.interfaces.map((i) => i.name);
+  if (!names.includes(selectedIface)) selectedIface = names[0] || null;
+  applySelection();
+}
+
+// 当前被选中的网口名（全局，跨 loadIfaces 重绘保持）。
+let selectedIface = null;
+
+// 选中某个网口：更新全局状态并重新套用高亮/展开。
+function selectIface(name) {
+  selectedIface = name;
+  applySelection();
+}
+
+// 按 selectedIface 给对应行加 .selected 高亮、展开它的详情行，其余收起。
+function applySelection() {
+  const rows = document.querySelectorAll("#ifaceTable tbody tr.iface-row");
+  rows.forEach((row) => {
+    const isSel = row.dataset.iface === selectedIface;
+    row.classList.toggle("selected", isSel);
+    const detail = document.getElementById(`detail-${row.dataset.sid}`);
+    if (!detail) return;
+    detail.classList.toggle("hidden", !isSel);
+    // 只对当前展开的那行算字号：隐藏的行宽度为 0，量不出来。
+    if (isSel) fitActionBar(detail.querySelector(".iface-actions"));
+  });
+}
+
+// 让一排操作按钮在等分宽度后仍放得下文字：从基准字号逐级往下试，
+// 一旦所有按钮都不再溢出（文字放得下）就停在那个字号。按钮多、列窄时自动变小。
+function fitActionBar(bar) {
+  if (!bar) return;
+  const btns = bar.querySelectorAll(".btn");
+  if (!btns.length) return;
+  const MAX = 18, MIN = 11; // 字号上下限（px）
+  for (let size = MAX; size >= MIN; size--) {
+    bar.style.fontSize = size + "px";
+    // scrollWidth > clientWidth 说明这个按钮里的文字比它被分到的宽度还宽 = 放不下
+    let overflow = false;
+    for (const b of btns) {
+      if (b.scrollWidth > b.clientWidth + 1) { overflow = true; break; }
+    }
+    if (!overflow) break; // 这个字号下都放得下，就用它
+  }
+}
+
+// 给所有「当前可见」的按钮条重算字号：②③ 步的 .term-actions 一直在，
+// ① 里的 .iface-actions 只有选中那行是展开可见的（隐藏的量不出宽度）。
+function fitAllBars() {
+  document.querySelectorAll(".term-actions").forEach(fitActionBar);
+  const sel = document.querySelector("#ifaceTable tbody tr.iface-row.selected");
+  if (sel) {
+    const detail = document.getElementById(`detail-${sel.dataset.sid}`);
+    if (detail) fitActionBar(detail.querySelector(".iface-actions"));
+  }
+}
+
+// 窗口尺寸变化会改变每列宽度，需要重算一次所有可见按钮条的字号。
+window.addEventListener("resize", fitAllBars);
+
+// 生成某网口配置面板的 HTML。radio 用 name="mode-<sid>" 保证各网口互不串。
+// det = 该网口当前的地址列表（i.ip_detail）：在面板顶部逐条列出，每条后带删除按钮。
+function cfgPanelHtml(name, sid, det) {
+  det = det || [];
+  // 现有 IP 列表：每条地址 + 来源标签 + 删除按钮（删除挪到这里，避免在常显列误点）。
+  let ipList = '<div class="cfg-ip-empty dim">（该网口暂无 IP）</div>';
+  if (det.length) {
+    ipList = det
+      .map((d) => {
+        const perm = d.kind === "permanent";
+        const title = perm
+          ? "从 netplan 删除这个永久地址（重启保留）"
+          : "临时删除这个运行态地址（等同 ip addr del）";
+        const delBtn =
+          `<button class="btn danger ipdel" title="${title}" ` +
+          `onclick="delLocalIp('${name}','${d.ip}',${d.prefix},${perm})">删除</button>`;
+        return `<div class="cfg-ip-row">` +
+          `<span class="cfg-ip-addr">${d.cidr}</span> ${kindTag(d.kind)} ${delBtn}` +
+          `</div>`;
+      })
+      .join("");
+  }
+  return `
+    <div class="local-cfg">
+      <div class="cfg-iplist">
+        <div class="cfg-iplist-title">本机网口现有 IP（点「删除」移除对应地址）：</div>
+        ${ipList}
+      </div>
+      <div class="cfg-line">
+        <span>生效时长：</span>
+        <label class="inline"><input type="radio" name="mode-${sid}" value="temp" checked onchange="onModeChange('${sid}')"> 临时（ip addr，重启失效）</label>
+        <label class="inline"><input type="radio" name="mode-${sid}" value="perm" onchange="onModeChange('${sid}')"> 永久（写 netplan，重启保留）</label>
+      </div>
+      <div class="cfg-line">
+        <label class="inline">IP <input class="cfg-ip" placeholder="如 192.168.10.5"></label>
+        <label class="inline">前缀 <input class="cfg-prefix" type="number" value="24" style="width:5em"></label>
+      </div>
+      <div class="cfg-line cfg-perm-only hidden">
+        <label class="inline">网关 <input class="cfg-gw" placeholder="留空=不配"></label>
+        <label class="inline">DNS <input class="cfg-dns" placeholder="逗号分隔，可留空"></label>
+        <small class="hint">（网关 / DNS 仅在「永久 · 改主 IP」时生效）</small>
+      </div>
+      <div class="cfg-line">
+        <button class="btn" title="在该网口上叠加一个新 IP（别名），不动原有 IP。" onclick="addLocalIp('${name}','${sid}')">新增此 IP（别名）</button>
+        <button class="btn danger" title="用这个 IP 替换该网口的主 IP；会先弹窗二次确认。" onclick="changeMainIp('${name}','${sid}')">设为主 IP（替换）</button>
+      </div>
+    </div>`;
+}
+
+// 记录哪些网口的配置面板当前是展开的，好在重绘整张表后仍保持展开。
+let openCfgIfaces = new Set();
+
+// 切换某网口配置面板的展开/收起
+function toggleCfg(name) {
+  const row = document.getElementById(`cfg-${safeId(name)}`);
+  if (!row) return;
+  const nowHidden = row.classList.toggle("hidden");
+  if (nowHidden) openCfgIfaces.delete(name);
+  else openCfgIfaces.add(name);
+}
+
+// 切「临时/永久」时：只有「永久」才显示网关/DNS 那一行。
+function onModeChange(sid) {
+  const perm = isPerm(sid);
+  const line = document.querySelector(`#cfg-${sid} .cfg-perm-only`);
+  if (line) line.classList.toggle("hidden", !perm);
+}
+
+// 读某网口面板里选的是不是「永久」
+function isPerm(sid) {
+  const el = document.querySelector(`#cfg-${sid} input[name="mode-${sid}"]:checked`);
+  return el ? el.value === "perm" : false;
+}
+
+// 读某网口面板里的一个输入框（cls 如 "cfg-ip"）
+function cfgVal(sid, cls) {
+  const el = document.querySelector(`#cfg-${sid} .${cls}`);
+  return el ? el.value.trim() : "";
+}
+
+// 统一显示本机配置操作的结果（成功/失败），并刷新网口列表。
+function showLocalResult(r) {
+  const box = document.getElementById("localResult");
+  if (r.ok) {
+    box.innerHTML = `<div class="rc ok">${escapeHtml(r.message || "操作完成。")}</div>`;
+  } else {
+    box.innerHTML = `<div class="rc bad">错误：${escapeHtml(r.error || "未知错误")}</div>`;
+  }
+  loadIfaces(); // 重新拉一遍，最新的 IP 列表立刻反映出来
+}
+
+// 新增别名 IP（临时/永久由面板 radio 决定）。不弹二次确认。
+async function addLocalIp(name, sid) {
+  const ip = cfgVal(sid, "cfg-ip");
+  const prefix = cfgVal(sid, "cfg-prefix") || "24";
+  if (!ip) {
+    showLocalResult({ ok: false, error: "请先填写要新增的 IP。" });
+    return;
+  }
+  const r = await post("/api/local/add_ip", {
+    iface: name, ip, prefix, persist: isPerm(sid),
+  });
+  showLocalResult(r);
+}
+
+// 改主 IP（替换）。临时/永久都要二次确认。
+async function changeMainIp(name, sid) {
+  const ip = cfgVal(sid, "cfg-ip");
+  const prefix = cfgVal(sid, "cfg-prefix") || "24";
+  if (!ip) {
+    showLocalResult({ ok: false, error: "请先填写新的主 IP。" });
+    return;
+  }
+  const perm = isPerm(sid);
+  const how = perm ? "永久（写 netplan，重启保留）" : "临时（重启失效）";
+  if (!confirm(
+    `确认把 ${name} 的主 IP 替换成 ${ip}/${prefix} 吗？（${how}）\n` +
+    "替换会瞬间断开基于旧 IP 的连接；若你正通过该网口远程访问本机，可能会断线。\n" +
+    "（本工具的页面走 127.0.0.1，通常不受影响。）"
+  )) return;
+
+  // 临时替换需要知道要删掉的旧主 IP：取该网口当前第一个地址（若取不到就只加不删）。
+  let old_ip = "", old_prefix = "";
+  if (!perm) {
+    const first = firstAddrOf(name);
+    if (first) { old_ip = first.ip; old_prefix = first.prefix; }
+  }
+  const r = await post("/api/local/change_main", {
+    iface: name, new_ip: ip, new_prefix: prefix, persist: perm,
+    gateway: cfgVal(sid, "cfg-gw"), dns: cfgVal(sid, "cfg-dns"),
+    old_ip, old_prefix,
+  });
+  showLocalResult(r);
+}
+
+// 从当前已渲染的网口行里，取某网口的第一个 IPv4 地址（用于临时改主 IP 时删旧地址）。
+// 直接从缓存的最近一次接口数据取，避免再发一次请求。
+let _lastIfaces = [];
+function firstAddrOf(name) {
+  const i = _lastIfaces.find((x) => x.name === name);
+  if (i && i.ip_detail && i.ip_detail.length) {
+    return { ip: i.ip_detail[0].ip, prefix: i.ip_detail[0].prefix };
+  }
+  return null;
+}
+
+// 删除某个地址：永久地址从 netplan 删，其余按临时删（ip addr del）。不弹二次确认。
+async function delLocalIp(name, ip, prefix, permanent) {
+  const r = await post("/api/local/del_ip", {
+    iface: name, ip, prefix, permanent: !!permanent,
+  });
+  showLocalResult(r);
 }
 
 // 把某网口名填进第 ② 步的「本机直连网口」框
@@ -416,3 +677,6 @@ loadIfaces();
 // 页面一打开就开始跟运行日志：立刻拉一次，之后每 LOG_POLL_MS 拉增量。
 pollLogs();
 logTimer = setInterval(pollLogs, LOG_POLL_MS);
+
+// 首屏给 ②③ 步的操作按钮条算一次字号（它们在静态 HTML 里，已就绪）。
+fitAllBars();
